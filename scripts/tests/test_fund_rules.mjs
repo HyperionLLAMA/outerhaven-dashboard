@@ -1,6 +1,6 @@
 // Offline tests for supabase/functions/fund-signals/rules.js: node scripts/tests/test_fund_rules.mjs
 import assert from 'node:assert/strict';
-import { classify } from '../../supabase/functions/fund-signals/rules.js';
+import { classify, strategyOf } from '../../supabase/functions/fund-signals/rules.js';
 
 const now = Date.parse('2026-10-14');
 const ago = m => new Date(now - m * 30.44 * 864e5).toISOString().slice(0, 10);
@@ -76,3 +76,13 @@ const rb = { id: 'r', company_name: 'Roers Income Fund II, LLC', manager_key: 'r
 assert.equal(formDTotal(rb, [rb, { company_name: 'Roers Multifamily Fund, LLC', manager_key: 'roers multifamily', fund_no: 0, executives: [{ name: 'Brian Roers' }], sold: 20e6 }]).total, 94.6e6);
 assert.equal(formDTotal(rb, [rb, { company_name: 'Other Fund I', manager_key: 'other', fund_no: 1, executives: [{ name: 'Jo Smith' }], sold: 20e6 }]).total, 74.6e6, 'strangers never add up');
 console.log('renamed ok');
+
+// Credit funds that sat in 'other' until 2 Nov 2026.
+for (const n of ['EAM Litigation Finance Fund I LP', 'Whiskey Capital Secured Financing Fund II, L.P.', 'TCW Rescue Financing Fund III LP',
+  'HPS Special Situations Opportunity Fund II, L.P.', 'LivBrook Distress Fund I, LP', 'Sona Capital Solutions II SCSp', 'ECM Yield Fund II, LLC',
+  'Silver Point Distressed Opportunity Institutional Partners II, L.P.', 'OC Trade Finance I LP'])
+  assert.equal(strategyOf({ company_name: n }), 'credit', n);
+for (const [n, want] of [['Plug & Play Financial Services Fund I, L.P.', 'other'], ['HO Fund II, a series of Socially Financed, LP', 'other'],
+  ['Five Point Natural Gas Yield Fund I LP', 'infra'], ['Acme Multifamily Income Fund II', 'real_estate'], ['Acme Ventures Fund II', 'venture'], ['KING STREET REAL ESTATE SPECIAL SITUATIONS (EUROPE) FUND II, L.P.', 'real_estate']])
+  assert.equal(strategyOf({ company_name: n }), want, n);
+console.log('strategy ok');

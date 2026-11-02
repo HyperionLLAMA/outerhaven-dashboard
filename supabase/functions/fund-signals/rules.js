@@ -3,7 +3,7 @@
 // Every verdict carries its reasons, so HQ can show exactly why a fund was kept or cut.
 
 // Bump when the rules change: the cron re-judges every stored signal on the old version.
-export const RULES_VERSION = 23;
+export const RULES_VERSION = 24;
 export const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
 export const romanOf = n => Object.keys(ROMAN).find(k => ROMAN[k] === n) || '';
 const US = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA PR RI SC SD TN TX UT VT VA WA WV WI WY'.split(' '));
@@ -86,13 +86,16 @@ export function normalize(it, list) {
 
 // Strategy from the fund name (Form D has no strategy field). Order matters: "Real Estate Credit" is credit.
 // The adviser's name counts too ("EV3 Fund II LP" says nothing; its adviser "EV3 Ventures LLC" does). "Income" alone is credit
-// only when nothing says real estate ("Multifamily Income Fund" is real estate).
+// only when nothing says real estate ("Multifamily Income Fund" is real estate). Audit 2 Nov 2026: "X Finance / Financing Fund"
+// (litigation, trade, export, mine, rescue financing), special situations, distressed and capital solutions funds sat in 'other';
+// they are credit ("Real Estate Special Situations" stays real estate). "Financial" (fintech VC, "Socially Financed" series) is not. "Yield" is credit only after infra ("Natural Gas Yield").
 export function strategyOf(s) {
   const t = `${s.company_name || ''} ${s.industry || ''} ${s.adviser_name || ''}`.toLowerCase();
-  if (/\b(credit|lending|loans?|debt|mezz\w*|direct lend\w*|specialty finance|asset[- ]based)\b/.test(t)) return 'credit';
+  if (/\b(credit|lending|loans?|debt|mezz\w*|direct lend\w*|specialty finance|asset[- ]based|finance|financing|rescue)\b/.test(t)) return 'credit';
   if (/\b(real estate|realty|propert\w*|multi-?family|apartments?|housing|residential|homes|land|reit|self[- ]storage|hospitality|hotels?|opportunity zone|qof|industrial outdoor)\b/.test(t)) return 'real_estate';
-  if (/\bincome\b/.test(t)) return 'credit';
-  if (/\b(infrastructure|infra|energy|power|renewables?|solar|wind|transition|climate)\b/.test(t)) return 'infra';
+  if (/\b(income|special situations?|distress\w*|capital solutions)\b/.test(t)) return 'credit';
+  if (/\b(infrastructure|infra|energy|power|natural gas|oil|midstream|renewables?|solar|wind|transition|climate)\b/.test(t)) return 'infra';
+  if (/\byield\b/.test(t)) return 'credit';
   if (/\b(ventures?|vc|seed|pre-?seed|founders?|labs|angels?|accelerator|studios?)\b/.test(t)) return 'venture';
   if (/\b(buyout|private equity|equity partners|growth equity|search fund|lower middle market|lmm)\b/.test(t)) return 'buyout';
   return 'other';
