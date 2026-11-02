@@ -415,7 +415,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 6;
+export const CREDIT_RULES_VERSION = 7;
 export function normalizeCredit(it) {
   return {
     cik: String(Number(it.cik)), company_name: it.name || 'Unknown', tickers: (it.tickers || []).join ? (it.tickers || []).join(', ') : it.tickers || null,
@@ -447,7 +447,7 @@ export function classifyCredit(s) {
   // can pay interest, so distress only scores when cash flow can carry a new loan.
   const e = s.ebitda, ix = s.interest_expense, net = total - (cash || 0);
   const lev = e > 0 ? net / e : null, cover = e > 0 && ix > 0 ? e / ix : null;
-  const rescue = e != null && ((e <= 0 && net > 0) || (lev != null && (lev > 10 || (cover != null && cover < 1))));
+  const rescue = e != null && (e <= 0 || (lev != null && (lev > 10 || (cover != null && cover < 1))));
   if (f.forbearance) { trigger = true; add('good', `Lender forbearance agreement (${f.forbearance.form} ${f.forbearance.date}): current lender is losing patience`, rescue ? 10 : 30); }
   if (f.going_concern) { trigger = true; add('good', `Going-concern doubt disclosed (${f.going_concern.form} ${f.going_concern.date}): needs rescue or bridge financing`, rescue ? 0 : 15); }
   if (s.revolver_current >= 5e6) add('info', `Plus ${money(s.revolver_current)} on a revolving line (classed as current but usually rolls over)`);
@@ -460,7 +460,8 @@ export function classifyCredit(s) {
   // cash flow is strong (net debt under 3x, interest covered 4x+): the bank refinances it, so it drops down the list.
   // Lendable band: 3-7x with interest covered 1.2x+ is what a private credit lender can refinance (AMS, DLH).
   if (e != null) {
-    if (e <= 0 && net > 0) { trigger = true; add('maybe', `Negative EBITDA (${money(e)}) with ${money(net)} net debt: a rescue, private credit rarely refinances these`, -20); }
+    // Any cash burn is a rescue: net cash just means a runway (Karyopharm), and missing debt tags hide the debt (Celularity).
+    if (e <= 0) { trigger = true; add('maybe', `Negative EBITDA (${money(e)})${net > 0 ? ` with ${money(net)} net debt` : ''}: burning cash, a rescue that private credit rarely refinances`, -20); }
     else if (rescue) { trigger = true; add('maybe', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
     else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
     else if (lev != null && lev >= 5) add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
