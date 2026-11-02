@@ -415,14 +415,14 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 4;
+export const CREDIT_RULES_VERSION = 5;
 export function normalizeCredit(it) {
   return {
     cik: String(Number(it.cik)), company_name: it.name || 'Unknown', tickers: (it.tickers || []).join ? (it.tickers || []).join(', ') : it.tickers || null,
     exchange: (it.exchanges || []).join ? (it.exchanges || []).join(', ') : it.exchange || null, sic: it.sic ? String(it.sic) : null, sic_desc: it.sicDesc || null,
     state: it.state || null, period_end: isoDate(it.periodEnd), debt_current: num(it.debtCurrent), debt_noncurrent: num(it.debtNoncurrent), revolver_current: num(it.revolverCurrent),
     cash: num(it.cash), revenue: num(it.revenue), public_float: num(it.publicFloat), flags: it.flags || {}, filing_url: it.filingUrl || null,
-    ebitda: num(it.ebitda), interest_expense: num(it.interestExpense),
+    ebitda: num(it.ebitda), interest_expense: num(it.interestExpense), debt_types: Array.isArray(it.debtTypes) ? it.debtTypes : null,
   };
 }
 export function classifyCredit(s) {
@@ -443,8 +443,13 @@ export function classifyCredit(s) {
   // Points (0-100): the refinancing deadline and lender stress matter most, then fit. Bigger gap = more urgent.
   if (dc >= 10e6 && cash != null && dc > cash) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }
   else if (dc >= 10e6 && cash != null && dc > 0.5 * cash) add('good', `${money(dc)} due within 12 months, ${Math.round(dc / cash * 100)}% of its cash${when}`, 10);
-  if (f.forbearance) { trigger = true; add('good', `Lender forbearance agreement (${f.forbearance.form} ${f.forbearance.date}): current lender is losing patience`, 30); }
-  if (f.going_concern) { trigger = true; add('good', `Going-concern doubt disclosed (${f.going_concern.form} ${f.going_concern.date}): needs rescue or bridge financing`, 15); }
+  // Rescue (3 Nov 2026, Tengku: the 100s were XCF / Hydrofarm with negative EBITDA): private credit refinances companies that
+  // can pay interest, so distress only scores when cash flow can carry a new loan.
+  const e = s.ebitda, ix = s.interest_expense, net = total - (cash || 0);
+  const lev = e > 0 ? net / e : null, cover = e > 0 && ix > 0 ? e / ix : null;
+  const rescue = e != null && ((e <= 0 && net > 20e6) || (lev != null && (lev > 10 || (cover != null && cover < 1))));
+  if (f.forbearance) { trigger = true; add('good', `Lender forbearance agreement (${f.forbearance.form} ${f.forbearance.date}): current lender is losing patience`, rescue ? 10 : 30); }
+  if (f.going_concern) { trigger = true; add('good', `Going-concern doubt disclosed (${f.going_concern.form} ${f.going_concern.date}): needs rescue or bridge financing`, rescue ? 0 : 15); }
   if (s.revolver_current >= 5e6) add('info', `Plus ${money(s.revolver_current)} on a revolving line (classed as current but usually rolls over)`);
   if (s.revenue >= 20e6 && s.revenue <= 200e6) add('good', `${money(s.revenue)} revenue: Peter's sweet spot ($20-200M), too small for the big advisers to chase`, 10);
   else if (s.revenue > 200e6 && s.revenue <= 1e9) add('good', `${money(s.revenue)} revenue: enough cash flow for a private loan, but the big advisers may already be there`, 3);
@@ -453,14 +458,15 @@ export function classifyCredit(s) {
   // Peter's leverage screen (8 Oct 2026): debt against cash flow. Net debt over 7x EBITDA with interest covered under 2x
   // usually ends in a restructuring or an expensive refinancing. And the audit's catch: a maturity alone means little when
   // cash flow is strong (net debt under 3x, interest covered 4x+): the bank refinances it, so it drops down the list.
-  const e = s.ebitda, ix = s.interest_expense, net = total - (cash || 0);
-  const lev = e > 0 ? net / e : null, cover = e > 0 && ix > 0 ? e / ix : null;
+  // Lendable band: 3-7x with interest covered 1.2x+ is what a private credit lender can refinance (AMS, DLH).
   if (e != null) {
-    if (e <= 0 && net > 20e6) { trigger = true; add('good', `Negative EBITDA (${money(e)}) with ${money(net)} net debt: a rescue, not a routine refinancing`, 10); }
+    if (e <= 0 && net > 20e6) { trigger = true; add('maybe', `Negative EBITDA (${money(e)}) with ${money(net)} net debt: a rescue, private credit rarely refinances these`, -20); }
+    else if (rescue) { trigger = true; add('maybe', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
     else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
     else if (lev != null && lev >= 5) add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
     else if (lev != null && lev < 3 && (cover == null || cover >= 4)) add('info', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will likely refinance, lower priority`, -15);
   }
+  if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
   // Numbers more than ~9 months old: the problem may already be fixed.
   if (s.period_end && Date.now() - Date.parse(s.period_end) > 270 * 864e5) add('info', `Balance sheet from ${s.period_end}: check the latest filing before calling`, -5);
   if (!trigger) add('maybe', 'No refinancing deadline, leverage problem, forbearance or going-concern warning found');

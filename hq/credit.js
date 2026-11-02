@@ -65,6 +65,12 @@ function rowHtml(s) {
     s.public_float != null ? `Float <b>${money(s.public_float)}</b>` : '',
     [s.sic_desc, s.state].filter(Boolean).map(esc).join(' · '),
   ].filter(Boolean);
+  // Loan type (XBRL instrument tags) → the market phrase for the opener. XBRL never names the lender: check the 10-Q.
+  const dt = s.debt_types || [];
+  const market = !s.debt_types ? '' : !dt.length ? 'Debt type not tagged: read the debt note in the 10-Q.'
+    : dt.some(t => /Convertible|Bonds/.test(t)) ? 'Opener: compare against <b>the private credit market</b>.'
+    : 'Opener: compare against <b>the non-bank market</b> (if the 10-Q names a credit fund as lender: <b>the wider private credit market</b>).';
+  if (dt.length) facts.unshift(`Debt <b>${dt.map(esc).join(' · ')}</b>`);
   const ev = [f.forbearance && `<a href="${esc(f.forbearance.url)}" target="_blank" rel="noopener">Forbearance (${esc(f.forbearance.form)}) ↗</a>`,
     f.going_concern && `<a href="${esc(f.going_concern.url)}" target="_blank" rel="noopener">Going concern (${esc(f.going_concern.form)}) ↗</a>`,
     s.filing_url && `<a href="${esc(s.filing_url)}" target="_blank" rel="noopener">Latest 10-K/10-Q ↗</a>`].filter(Boolean);
@@ -74,6 +80,7 @@ function rowHtml(s) {
       <h4>${esc(s.company_name)}${s.tickers ? ` <span class="fsVeh">${esc(s.tickers)}${s.exchange ? ' · ' + esc(s.exchange) : ''}</span>` : ''}</h4>
       ${markLine(s)}
       <div class="fsFacts">${facts.map(x => `<span>${x}</span>`).join('')}</div>
+      ${market ? `<p class="pHint">${market}</p>` : ''}
       ${contactHtml('credit', String(Number(s.cik)), s)}
       ${whyBlock(s.reasons, esc)}
       <div class="fsPeople"><a href="${cfoSearch(s)}" target="_blank" rel="noopener">Find the CFO on LinkedIn ↗</a>${ev.join('')}</div>

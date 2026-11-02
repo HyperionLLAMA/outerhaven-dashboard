@@ -1,6 +1,6 @@
 // Rules page (#/rules, admin): every qualification rule behind the signal tabs, in plain words, with the same
 // Need / Risk / Fit / Check / Cut labels the tabs use. Written from the rules files on the server:
-//   supabase/functions/bdc-signals/rules.js (BDC_RULES_VERSION 6), fund-signals/rules.js (classifyCredit v4, fund v15),
+//   supabase/functions/bdc-signals/rules.js (BDC_RULES_VERSION 6), fund-signals/rules.js (classifyCredit v5, fund v15),
 //   ucc-signals/rules.js (UCC_RULES_VERSION 4). When a rule changes there, change it here in the same commit.
 import { esc } from './core.js';
 import { KINDS, kindLegend } from './kinds.js';
@@ -37,7 +37,8 @@ export function renderRules(el) {
     ['Cut', [['cut', 'Bank, insurer or fund. Ticker ending in Q (already in Chapter 11).'], ['cut', 'Revenue under $20M or none: nothing to lend against.'], ['cut', 'Over $750M of debt or public float over $2B: banks and bond markets cover it.']]],
     ['Fit', [['fit', '$20–200M revenue: Peter\'s sweet spot.', '+10'], ['fit', '$200M–1B revenue.', '+3'], ['fit', 'Public float $300M or less: too small for the bond market.', '+10'], ['fit', '$20–300M total debt: the size Peter\'s lenders write.', '+8']]],
     ['Need', [['need', 'Term debt due within 12 months is more than its cash: must refinance.', '+30 to +45'], ['need', 'Debt due within 12 months is over half its cash.', '+10']]],
-    ['Risk', [['risk', 'Lender forbearance agreement: the current lender is losing patience.', '+30'], ['risk', 'Going-concern doubt disclosed: needs rescue or bridge money. Hardest to finance.', '+15'], ['risk', 'Net debt 7x+ EBITDA with interest covered under 2x: restructuring likely.', '+25'], ['risk', 'Negative EBITDA with $20M+ net debt: a rescue, not a refinancing.', '+10'], ['risk', 'Net debt 5x+ EBITDA: highly levered.', '+8']]],
+    ['Risk', [['risk', 'Lender forbearance agreement: the current lender is losing patience.', '+30'], ['risk', 'Going-concern doubt disclosed: needs rescue or bridge money. Hardest to finance.', '+15 (0 for a rescue)'], ['risk', 'Forbearance on a rescue.', '+10'], ['risk', 'Net debt 7–10x EBITDA with interest covered 1–2x: restructuring likely (Peter\'s screen).', '+25'], ['risk', 'Rescue: negative EBITDA with $20M+ net debt. Private credit rarely refinances these.', 'Maybe, −20'], ['risk', 'Rescue: net debt over 10x EBITDA, or interest covered under 1x.', 'Maybe, −15'], ['risk', 'Net debt 5x+ EBITDA: highly levered.', '+8']]],
+    ['Lendable', [['fit', 'Net debt 3–7x EBITDA with interest covered 1.2x+: cash flow a private credit lender can refinance.', '+10'], ['fit', 'Every card shows the debt type (convertible notes, bonds, revolver, term loan) and which market to name in the opener.', 'Info']]],
     ['Check', [['check', 'Strong cash flow (net debt under 3x, interest covered 4x+): its bank will likely refinance.', '−15'], ['check', 'Balance sheet over 9 months old: check the latest filing first.', '−5'], ['check', 'Revenue not found, or non-US.', 'Maybe']]],
   ])}
 

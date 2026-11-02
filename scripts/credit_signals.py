@@ -38,6 +38,16 @@ CASH = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedC
 OP_INCOME = ["OperatingIncomeLoss"]
 DA = ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization", "DepreciationAmortizationAndAccretionNet"]
 INTEREST = ["InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt", "InterestPaidNet"]
+# Loan type tag (3 Nov 2026, Tengku): which instruments the balance sheet reports, so the opener names the right market.
+# XBRL shows the instrument, never the lender (bank vs private credit fund): that is in the 10-Q debt note.
+DEBT_TYPES = {
+    "Convertible notes": ["ConvertibleNotesPayable", "ConvertibleNotesPayableCurrent", "ConvertibleNotesPayableNoncurrent",
+                          "ConvertibleDebtCurrent", "ConvertibleDebtNoncurrent", "ConvertibleLongTermNotesPayable"],
+    "Bonds / senior notes": ["SeniorNotes", "SeniorNotesCurrent", "SeniorNotesNoncurrent", "UnsecuredDebt", "UnsecuredDebtCurrent"],
+    "Revolver": ["LineOfCredit", "LinesOfCreditCurrent", "LongTermLineOfCredit"],
+    "Term / secured loan": ["SecuredDebt", "SecuredDebtCurrent", "SecuredLongTermDebt", "LoansPayable", "LoansPayableCurrent",
+                            "LongTermLoansPayable", "NotesPayableToBank", "NotesPayableToBankCurrent", "NotesPayableToBankNoncurrent"],
+}
 REVENUE = ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet",
            "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueGoodsNet", "RegulatedAndUnregulatedOperatingRevenue"]
 
@@ -213,6 +223,8 @@ def credit():
     flt = frame("EntityPublicFloat", f"CY{today.year - 1}Q2I", tax="dei")
     yr = f"CY{today.year - 1}"
     opi, dna, intx = best(OP_INCOME, yr), best(DA, yr), best(INTEREST, yr)
+    dtypes = {label: best(tags, period) for label, tags in DEBT_TYPES.items()}
+    debt_types = lambda c: [label for label, m in dtypes.items() if (val(m, c) or 0) > 0]
     def ebitda(c):
         o = val(opi, c)
         return None if o is None else o + (val(dna, c) or 0)
@@ -273,7 +285,7 @@ def credit():
             flags["going_concern"] = gc[c]
         batch.append({"cik": c, **p, "periodEnd": (dcur.get(c) or cash.get(c) or (None, None))[1], "debtCurrent": val(dcur, c),
                       "debtNoncurrent": val(dnon, c), "revolverCurrent": val(rvl, c), "cash": val(cash, c), "revenue": val(rev, c), "publicFloat": val(flt, c), "flags": flags,
-                      "ebitda": ebitda(c), "interestExpense": val(intx, c)})
+                      "ebitda": ebitda(c), "interestExpense": val(intx, c), "debtTypes": debt_types(c)})
         if len(batch) >= 100:
             r = post({"action": "ingest", "kind": "credit", "items": batch, "period": period, "run": run, "stats": STATS})
             sent += len(batch)
