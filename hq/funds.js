@@ -268,7 +268,7 @@ function addModal(s) {
       const now = new Date().toISOString(), fundLine = `${s.company_name}${s.offering ? ` · ${money(s.offering)} target` : ''}${s.sold != null ? `, ${money(s.sold)} raised` : ''}`;
       let first = null;
       for (const p of chosen) {
-        const r = await sb.from('people').insert({ name: p.name, primary_side: 'Sell Side', relationship_type: 'Sell-side Relationship', pipeline_stage: 'New Relationship', pipeline_active: true, waiting_on: 'us', waiting_on_since: now, company_name: s.company_name, headline: p.title || null, source: 'Form D', last_inbound_message: `Form D signal: ${fundLine}. ${(s.reasons || []).filter(x => x.tone === 'good').map(x => x.text).join('. ')}`, created_by: state.user?.id }).select().single();
+        const r = await sb.from('people').insert({ name: p.name, primary_side: 'Sell Side', relationship_type: 'Sell-side Relationship', pipeline_stage: 'To Reach Out', owner_name: String(fd.get('owner') || '').trim() || null, pipeline_active: true, waiting_on: 'us', waiting_on_since: now, company_name: s.company_name, headline: p.title || null, source: 'Form D', last_inbound_message: `Form D signal: ${fundLine}. ${(s.reasons || []).filter(x => x.tone === 'good').map(x => x.text).join('. ')}`, created_by: state.user?.id }).select().single();
         if (fail(r, 'Add ' + p.name)) return false;
         first = first || r.data.id;
         await sb.from('tasks').insert({ person_id: r.data.id, action: String(fd.get('next') || '').trim() || 'Find on LinkedIn', owner_name: fd.get('owner'), due_date: now.slice(0, 10), created_by: state.user?.id });

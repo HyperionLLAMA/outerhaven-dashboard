@@ -15,6 +15,9 @@ description: Build the free resource behind a lead magnet post (Notion doc, PDF,
 > **Swipe file breakdown jobs:** if the job row's `payload->>'type'` is `'breakdown'`, this is not a lead magnet.
 > Ignore the rest of this skill and follow `routines/breakdown.md` in this repo for the whole job.
 
+> **Pre-meeting brief jobs:** if the job row's `payload->>'type'` is `'brief'`, this is not a lead magnet.
+> Ignore the rest of this skill and follow `routines/brief.md` in this repo for the whole job.
+
 > **Deal teaser jobs:** if the job row's `payload->>'type'` is `'teaser'`, this is not a lead magnet.
 > Ignore the rest of this skill and follow `routines/teaser-builder.md` in this repo for the whole job.
 

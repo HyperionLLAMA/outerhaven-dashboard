@@ -155,6 +155,39 @@ Deno.serve(async (req) => {
     return json(await fireAndRecord(ins.id));
   }
 
+  // Pre-meeting brief (4 Nov 2026): research the lead and judge whether OuterHaven is a specialist in their lane.
+  // Same routine; the skill hands it to routines/brief.md, which writes payload.brief. HQ copies it onto people.brief.
+  if (body.action === "brief") {
+    const b = body.brief || {};
+    const { data: p } = await sb.from("people").select("*").eq("id", text(b.person_id, 64)).maybeSingle();
+    if (!p) return json({ ok: false, error: "Person not found." }, 404);
+    if (!(await underCap())) return json({ ok: false, error: `Today's limit of ${cap} Claude jobs is reached. An admin can raise it in Resources → Settings.` }, 429);
+    const oppId = text(b.opportunity_id, 64);
+    const { data: opp } = oppId ? await sb.from("opportunities").select("*").eq("id", oppId).maybeSingle() : { data: null };
+    const slug = String(p.linkedin_url || "").replace(/[?#].*$/, "").replace(/\/+$/, "").split("/").pop() || "";
+    const ors = [`person_id.eq.${p.id}`, slug && `linkedin_url.ilike.%${slug}%`].filter(Boolean).join(",");
+    const { data: replies } = await sb.from("lead_intake").select("reply_text,created_at,campaign_name,source_account,headline,company_name").or(ors).order("created_at").limit(12);
+    const { data: threads } = slug ? await sb.from("dm_conversations").select("account_name,messages,captured_at").ilike("prospect_url", `%${slug}%`).order("captured_at", { ascending: false }).limit(1) : { data: [] };
+    const row = {
+      created_by: who.id, requested_by: who.email, kind: "resource", format: "other", poster: "Tengku Harris", brand: "OuterHaven Advisory",
+      topic: `Brief: ${p.name}${p.company_name ? " · " + p.company_name : ""}`, caption: p.last_inbound_message || "", notes: text(b.notes, 4000) || null,
+      fired_at: new Date().toISOString(),
+      payload: {
+        type: "brief", person_id: p.id, opportunity_id: opp?.id || null,
+        person: { name: p.name, company_name: p.company_name, headline: p.headline, linkedin_url: p.linkedin_url, side: p.primary_side, stage: p.pipeline_stage,
+          source: p.source, source_account: p.source_account, thesis: p.thesis, notes: p.notes, interest_deal_size: p.interest_deal_size,
+          interest_opportunity: p.interest_opportunity, qualification_reason: p.qualification_reason, last_inbound_message: p.last_inbound_message, owner_name: p.owner_name },
+        opportunity: opp ? { title: opp.title, side: opp.side, stage: opp.pipeline_stage || opp.stage, size: opp.opportunity_size, raise: opp.revenue_raise_amount,
+          sector: opp.sector, geography: opp.geography, transaction_type: opp.transaction_type, notes: opp.notes } : null,
+        replies: replies || [], thread: threads?.[0] || null,
+      },
+    };
+    const { data: ins, error: e4 } = await sb.from("resource_jobs").insert(row).select("id").single();
+    if (e4) return json({ ok: false, error: e4.message }, 500);
+    await sb.from("people").update({ brief_job_id: ins.id }).eq("id", p.id);
+    return json(await fireAndRecord(ins.id));
+  }
+
   // Swipe file breakdown (14 Oct 2026): someone else's post, saved in Growth → Playbook. Same routine; the skill hands it to
   // routines/breakdown.md, which writes breakdown / recreate / archetype onto the swipe_posts row.
   if (body.action === "breakdown") {

@@ -187,7 +187,7 @@ function addModal(s) {
     async onSubmit(fd) {
       const now = new Date().toISOString(), name = String(fd.get('name')).trim(), li = String(fd.get('li') || '').trim() || null;
       const facts = `${s.company_name}: ${(s.reasons || []).filter(x => x.tone === 'good').map(x => x.text).join(' ')} Lenders: ${(s.holders || []).map(h => bdcShort(h.bdc)).join(', ')}.`;
-      const r = await sb.from('people').insert({ name, primary_side: 'Sell Side', relationship_type: 'Sell-side Relationship', pipeline_stage: 'New Relationship', pipeline_active: true, waiting_on: 'us', waiting_on_since: now, company_name: s.company_name, headline: String(fd.get('title') || '').trim() || null, linkedin_url: li, has_linkedin: !!li, source: 'BDC loan signal', last_inbound_message: facts, created_by: state.user?.id }).select().single();
+      const r = await sb.from('people').insert({ name, primary_side: 'Sell Side', relationship_type: 'Sell-side Relationship', pipeline_stage: 'To Reach Out', owner_name: String(fd.get('owner') || '').trim() || null, pipeline_active: true, waiting_on: 'us', waiting_on_since: now, company_name: s.company_name, headline: String(fd.get('title') || '').trim() || null, linkedin_url: li, has_linkedin: !!li, source: 'BDC loan signal', last_inbound_message: facts, created_by: state.user?.id }).select().single();
       if (fail(r, 'Add')) return false;
       await sb.from('tasks').insert({ person_id: r.data.id, action: String(fd.get('next') || '').trim() || 'Connect and send the message', owner_name: fd.get('owner'), due_date: now.slice(0, 10), created_by: state.user?.id });
       await sb.from('bdc_signals').update({ status: 'added', person_id: r.data.id, updated_at: now }).eq('id', s.id);

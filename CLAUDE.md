@@ -79,6 +79,27 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
 - Leads are ranked by `leadHeat()` (pipeline.js): asks for a call / gives contact = "Wants to talk", deal words = "Has a deal", polite no = "Looks like a no". Chase's inbox tasks on Today show unanswered outreach replies per account (by `source_account` slug).
 - Outbound reality (Oct 2026): Peter, Tengku, Chase run campaigns in Prosp (replies arrive in `lead_intake` via webhook; sends are not tracked); the other 6 accounts are manual in AdsPower.
 
+## Lead owners, round robin, To Reach Out, pre-meeting briefs (4 Nov 2026, Tengku; `hq/leadowner.js`, `hq/brief.js`)
+- Every lead is an eventual customer, so we follow up forever. **Before the first meeting** a lead talks to ONE person:
+  `people.owner_name` (sticky). LinkedIn leads → the inbox responder of the account they came in on (`inbox_owners`); signal
+  adds → the owner picked in the Add modal; Add person → picked, or round robin = `pickOwner()` (fewest live pre-meeting leads).
+  `backfillOwners()` in pipeline.js gives every ownerless live person one on first load (task owner > responder > round robin).
+- **After the first meeting** (`met_at`, stamped when a person reaches `MET_FROM` = Diligence Call Complete or later, or by stage
+  alone) follow-up touches rotate `ROTATION` = Tengku → Anaz → Chase, per touch: `nextSender()` = the one after `last_touch_by`.
+  Cadence `CADENCE` = 3, 7, 14, 30 days, then 30 forever (`touch_count` counts post-meeting touches). Flag `touch` "Follow-up due ·
+  X's turn" replaces the old "their move" flag for met people; "Sent follow-up" logs the touch. Chip **My turn** = your touches due
+  + your pre-meeting leads where it's our move.
+- **To Reach Out** = new first stage on every side (before New Relationship): targets nobody has spoken to yet. Signal "Add to
+  pipeline" (funds/credit/bdc/ucc) lands there; own tab in the Needs-you card; never red, never in Needs you; "Reached out" moves it
+  to New Relationship. Unknown/empty stages still count as New Relationship (`stageIdx`). The outreach edge function still inserts
+  at New Relationship (those were already sent).
+- **Pre-meeting brief** (Marco Demiroz went badly: nobody focused on AI). "Brief" on rows / "Prep brief" in the update window →
+  `resource-request` action `brief` (builds payload: person, deal, replies, DM thread; sets `people.brief_job_id`) → routine →
+  `routines/brief.md` (lanes table = what OuterHaven is actually specialised in; size raises the bar; verdict strong / partial /
+  none + who leads + angle) → `resource_jobs.payload.brief`; `syncBriefs()` copies it onto `people.brief` (`brief_ready_job`).
+  Flag "No pre-meeting brief" (warn) on un-met people. Update the lanes table in brief.md when the team or offer changes.
+- Migration `supabase/2026-11-04-lead-owners-rotation-brief.sql` (columns only; the To Reach Out stage move is an UPDATE the user runs).
+
 ## Deals (sidebar page `#/deals`, `hq/deals.js` `renderDealsPage`, admin only; 7 Oct 2026)
 - Deals PROVIDED to us (mandates, teasers, CIMs from sponsors / banks / introducers) for Peter to review. Not outbound targets.
   Table `deals` (codename, source, type, ask_text/ask_amount (USD only, `parseAsk`), valuation, structure, fee terms, summary,
