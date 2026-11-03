@@ -415,7 +415,13 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 7;
+export const CREDIT_RULES_VERSION = 8;
+// Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
+// cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
+export const CREDIT_TAGS = {
+  lendable: 'Lendable', stretched: 'Highly levered', bank_refi: 'Bank will refinance', check_data: 'Check the numbers',
+  burning_cash: 'Burning cash', over_levered: 'Over-levered', too_big: 'Too big', too_small: 'Too small', not_borrower: 'Not a borrower', chapter_11: 'In Chapter 11', non_us: 'Non-US',
+};
 export function normalizeCredit(it) {
   return {
     cik: String(Number(it.cik)), company_name: it.name || 'Unknown', tickers: (it.tickers || []).join ? (it.tickers || []).join(', ') : it.tickers || null,
@@ -426,19 +432,21 @@ export function normalizeCredit(it) {
   };
 }
 export function classifyCredit(s) {
-  const R = [], add = (tone, text, pts = 0) => R.push({ tone, text, pts });
+  const R = [], add = (tone, text, pts = 0) => R.push({ tone, text, pts }), tags = new Set();
   const sic = Number(s.sic) || 0, f = s.flags || {};
   const dc = s.debt_current, cash = s.cash, total = (s.debt_current || 0) + (s.debt_noncurrent || 0);
   const when = s.period_end ? ` (balance sheet ${s.period_end})` : '';
-  if (sic >= 6000 && sic <= 6799 && sic !== 6798) add('cut', `Bank, insurer or fund (${s.sic_desc || 'SIC ' + sic}): not a borrower for us`);
+  if (sic >= 6000 && sic <= 6799 && sic !== 6798) tags.add('not_borrower'), add('cut', `Bank, insurer or fund (${s.sic_desc || 'SIC ' + sic}): not a borrower for us`);
   if (s.on_latest === false) add('cut', 'No longer on the latest scan: its numbers stopped showing a trigger (earlier runs counted revolving lines as debt due)');
-  if (/(^|,\s*)[A-Z]{4}Q(,|$)/.test(s.tickers || '')) add('cut', 'Ticker ends in Q: already in Chapter 11, its rescue lenders are set');
+  if (/(^|,\s*)[A-Z]{4}Q(,|$)/.test(s.tickers || '')) tags.add('chapter_11'), add('cut', 'Ticker ends in Q: already in Chapter 11, its rescue lenders are set');
   if (s.revenue == null) add('maybe', 'Revenue not found in its filings');
-  else if (s.revenue === 0) add('cut', 'No revenue reported: pre-revenue, nothing for a lender to lend against');
-  else if (s.revenue < 20e6) add('cut', `Revenue only ${money(s.revenue)}: no cash flow for a lender to lend against`);
-  if (total > 750e6) add('cut', `${money(total)} of debt: big enough for banks and the bond market`);
-  if (s.public_float != null && s.public_float > 2e9) add('cut', `Public float ${money(s.public_float)}: too large, has bank coverage`);
-  if (s.state && !US.has(s.state)) add('maybe', `Non-US company (${s.state})`);
+  else if (s.revenue === 0) tags.add('too_small'), add('cut', 'No revenue reported: pre-revenue, nothing for a lender to lend against');
+  else if (s.revenue < 20e6) tags.add('too_small'), add('cut', `Revenue only ${money(s.revenue)}: no cash flow for a lender to lend against`);
+  // Too big (4 Nov 2026): Peter's lenders write $20-300M; above that, or $1B+ revenue, banks and the bond market cover it.
+  if (total > 300e6) tags.add('too_big'), add('cut', `${money(total)} of debt: above the $300M private credit lenders write, banks and the bond market cover it`);
+  else if (s.revenue > 1e9) tags.add('too_big'), add('cut', `${money(s.revenue)} revenue: big enough for bank and bond coverage`);
+  if (s.public_float != null && s.public_float > 2e9) tags.add('too_big'), add('cut', `Public float ${money(s.public_float)}: too large, has bank coverage`);
+  if (s.state && !US.has(s.state)) tags.add('non_us'), add('maybe', `Non-US company (${s.state})`);
   let trigger = false;
   // Points (0-100): the refinancing deadline and lender stress matter most, then fit. Bigger gap = more urgent.
   if (dc >= 10e6 && cash != null && dc > cash) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }
@@ -461,17 +469,19 @@ export function classifyCredit(s) {
   // Lendable band: 3-7x with interest covered 1.2x+ is what a private credit lender can refinance (AMS, DLH).
   if (e != null) {
     // Any cash burn is a rescue: net cash just means a runway (Karyopharm), and missing debt tags hide the debt (Celularity).
-    if (e <= 0) { trigger = true; add('maybe', `Negative EBITDA (${money(e)})${net > 0 ? ` with ${money(net)} net debt` : ''}: burning cash, a rescue that private credit rarely refinances`, -20); }
-    else if (rescue) { trigger = true; add('maybe', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
-    else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
-    else if (lev != null && lev >= 5) add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
-    else if (lev != null && lev < 3 && (cover == null || cover >= 4)) add('info', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will likely refinance, lower priority`, -15);
+    if (e <= 0) { trigger = true; tags.add('burning_cash'); add('cut', `Negative EBITDA (${money(e)})${net > 0 ? ` with ${money(net)} net debt` : ''}: burning cash, a rescue that private credit rarely refinances`, -20); }
+    else if (rescue) { trigger = true; tags.add('over_levered'); add('cut', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
+    else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { tags.add('stretched'); trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
+    else if (lev != null && lev >= 5) tags.add('stretched'), add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
+    else if (lev != null && lev < 3 && (cover == null || cover >= 4)) tags.add('bank_refi'), add('info', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will likely refinance, lower priority`, -15);
   }
-  if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
+  if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) tags.add('lendable'), add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
   // Numbers more than ~9 months old: the problem may already be fixed.
   if (s.period_end && Date.now() - Date.parse(s.period_end) > 270 * 864e5) add('info', `Balance sheet from ${s.period_end}: check the latest filing before calling`, -5);
   if (!trigger) add('maybe', 'No refinancing deadline, leverage problem, forbearance or going-concern warning found');
+  // Numbers we can't trust: no EBITDA, no debt on file, or interest cover too high to be real (1847 Holdings showed 60.9x).
+  if (e == null || !total || (cover != null && cover > 30)) { tags.add('check_data'); add('maybe', e == null ? 'EBITDA not found in its filings: check the 10-Q' : !total ? 'No debt figure in its filings: check the 10-Q' : `Interest covered ${cover.toFixed(0)}x looks wrong: check the 10-Q`); }
   const verdict = R.some(r => r.tone === 'cut') ? 'cut' : R.some(r => r.tone === 'maybe') ? 'maybe' : 'target';
   const score = Math.max(0, Math.min(100, R.reduce((n, r) => n + r.pts, 0)));
-  return { verdict, score: verdict === 'cut' ? Math.min(score, 20) : score, reasons: R.map(({ tone, text }) => ({ tone, text })) };
+  return { verdict, score: verdict === 'cut' ? Math.min(score, 20) : score, reasons: R.map(({ tone, text }) => ({ tone, text })), tags: [...tags] };
 }

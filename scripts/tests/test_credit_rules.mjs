@@ -17,8 +17,17 @@ const spru = classifyCredit({ ...base, debt_current: 269.6e6, debt_noncurrent: 3
 assert.equal(ams.verdict, 'target'); assert.ok(ams.reasons.some(r => /^Lendable/.test(r.text)));
 assert.equal(dlh.verdict, 'target'); assert.ok(dlh.reasons.some(r => /^Lendable/.test(r.text)));
 for (const [n, r] of [['XCF', xcf], ['Hydrofarm', hyfm], ['Spruce', spru], ['Agenus (small net debt)', agen], ['Karyopharm (net cash)', kpti], ['Celularity (no debt tags)', celu]]) {
-  assert.equal(r.verdict, 'maybe', `${n} is a rescue`);
+  assert.equal(r.verdict, 'cut', `${n} is a rescue`);
+  assert.ok(r.tags.some(t => t === 'burning_cash' || t === 'over_levered'), `${n} tagged unfinanceable`);
   assert.ok(r.reasons.some(x => /rescue.*private credit rarely/.test(x.text)), `${n} says rescue`);
   assert.ok(r.score < ams.score, `${n} (${r.score}) below AMS (${ams.score})`);
 }
+assert.ok(ams.tags.includes('lendable') && dlh.tags.includes('lendable'));
+// Too big (4 Nov 2026): INNOVATE $616M debt, Universal Logistics $1.56B revenue.
+const vate = classifyCredit({ ...base, debt_current: 553.9e6, debt_noncurrent: 62.1e6, cash: 87.8e6, revenue: 1246e6, ebitda: 59.1e6, interest_expense: 30e6, public_float: 100e6, flags: gc });
+assert.equal(vate.verdict, 'cut'); assert.ok(vate.tags.includes('too_big'));
+// Numbers we can't trust stay Maybe with a tag: 1847 Holdings interest covered 60.9x, Evofem no debt figure.
+const lbra = classifyCredit({ ...base, debt_current: 22.8e6, cash: 0.4e6, revenue: 48.3e6, ebitda: 5.4e6, interest_expense: 0.09e6, public_float: 10e6, flags: gc });
+const evfm = classifyCredit({ ...base, cash: 0.3e6, revenue: 20.2e6, ebitda: 3.4e6, interest_expense: 2.4e6, public_float: 10e6, flags: gc });
+for (const r of [lbra, evfm]) { assert.equal(r.verdict, 'maybe'); assert.ok(r.tags.includes('check_data')); }
 console.log('credit rules ok', { ams: ams.score, dlh: dlh.score, xcf: xcf.score, hyfm: hyfm.score, spru: spru.score });

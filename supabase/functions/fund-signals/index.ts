@@ -178,7 +178,7 @@ async function ingestCheck(ids: string[], items: any[], error: string | null, at
 async function judgeCredit(rows: any[]) {
   for (let i = 0; i < rows.length; i += 20) await Promise.all(rows.slice(i, i + 20).map(s => {
     const c = classifyCredit(s);
-    return sb.from("credit_signals").update({ verdict: c.verdict, score: c.score, reasons: c.reasons, rules_version: CREDIT_RULES_VERSION }).eq("id", s.id);
+    return sb.from("credit_signals").update({ verdict: c.verdict, score: c.score, reasons: c.reasons, tags: c.tags, rules_version: CREDIT_RULES_VERSION }).eq("id", s.id);
   }));
 }
 async function ingestCredit(items: any[], params: any) {

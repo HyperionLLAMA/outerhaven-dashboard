@@ -8,7 +8,11 @@ import { loadContacts, contactHtml, bindContacts, bestPerson, contactsSetup, cfo
 import { markBtns, markLine, bindMarks, MARK_VIEWS, inMarkView } from './marks.js';
 import { me } from './tasks.js';
 
-let el = null, rows = [], runs = [], view = 'target', onCount = () => {};
+let el = null, rows = [], runs = [], view = 'target', tag = '', onCount = () => {};
+// Lender-fit tags from classifyCredit (rules.js CREDIT_TAGS). Symbol + word, never colour alone.
+const TAGS = { lendable: ['✓', 'Lendable'], stretched: ['⚠', 'Highly levered'], bank_refi: ['•', 'Bank will refinance'], check_data: ['?', 'Check the numbers'],
+  burning_cash: ['✕', 'Burning cash'], over_levered: ['✕', 'Over-levered'], too_big: ['✕', 'Too big'], too_small: ['✕', 'Too small'], not_borrower: ['✕', 'Not a borrower'], chapter_11: ['✕', 'In Chapter 11'], non_us: ['?', 'Non-US'] };
+const tagTxt = k => TAGS[k] ? `${TAGS[k][0]} ${TAGS[k][1]}` : k;
 const money = n => n == null ? '—' : Math.abs(n) >= 1e9 ? '$' + +(n / 1e9).toFixed(1) + 'B' : Math.abs(n) >= 1e6 ? '$' + +(n / 1e6).toFixed(1) + 'M' : Math.abs(n) >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
 const day = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const toneOf = t => t === 'good' ? 'good' : t === 'cut' ? 'bad' : t === 'maybe' ? 'warn' : '';
@@ -39,7 +43,10 @@ function draw() {
   const counts = { target: 0, newcfo: 0, maybe: 0, cut: 0, added: 0, dismissed: 0, starred: 0, flagged: 0 };
   const newCfo = s => bucket(s) === 'target' && cfoChanged(String(Number(s.cik)));
   rows.forEach(s => { counts[bucket(s)]++; if (newCfo(s)) counts.newcfo++; if (s.starred_at) counts.starred++; if (s.flagged_at) counts.flagged++; });
-  const shown = rows.filter(s => view === 'newcfo' ? newCfo(s) : inMarkView(view, s) ?? bucket(s) === view).sort((a, b) => b.score - a.score);
+  const inView = rows.filter(s => view === 'newcfo' ? newCfo(s) : inMarkView(view, s) ?? bucket(s) === view);
+  const tagCounts = {}; inView.forEach(s => (s.tags || []).forEach(t => tagCounts[t] = (tagCounts[t] || 0) + 1));
+  if (tag && !tagCounts[tag]) tag = '';
+  const shown = inView.filter(s => !tag || (s.tags || []).includes(tag)).sort((a, b) => b.score - a.score);
   const last = runs[0];
   onCount(counts.target);
   el.innerHTML = `<div class="fs">
@@ -47,6 +54,7 @@ function draw() {
       <div class="row fsBtns"><a class="btn sm ghost" href="${GH_RUN}" target="_blank" rel="noopener">Run a scan on GitHub ↗</a><button class="btn sm ghost" id="crHow">How it works</button><a class="btn sm ghost" href="#/rules">How we qualify</a><button class="btn sm ghost" id="ctSetup">Contacts setup</button></div></div>
     <p class="pHint">Source: SEC XBRL financials and full-text search (edgartools), refreshed daily on GitHub, free.${last ? ` Last run <b>${new Date(last.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</b>${last.params?.period ? ` · balance sheets ${esc(last.params.period)}` : ''}.` : ' Not run yet: on GitHub choose Run workflow, mode <b>credit</b>.'}</p>
     <div class="fsViews">${[['target', 'Targets'], ['newcfo', 'New CFO + debt'], ['maybe', 'Maybe'], ['cut', 'Cut'], ['added', 'In pipeline'], ['dismissed', 'Dismissed'], ...MARK_VIEWS].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}" data-tone="${k === 'target' ? 'good' : k === 'cut' ? 'bad' : ''}">${l} <b>${counts[k]}</b></button>`).join('')}</div>
+    ${Object.keys(tagCounts).length ? `<div class="fsViews" aria-label="Filter by lender fit"><button type="button" data-tag="" class="${tag ? '' : 'on'}">All <b>${inView.length}</b></button>${Object.keys(TAGS).filter(k => tagCounts[k]).map(k => `<button type="button" data-tag="${k}" class="${tag === k ? 'on' : ''}">${esc(tagTxt(k))} <b>${tagCounts[k]}</b></button>`).join('')}</div>` : ''}
     <div class="fsList">${shown.length ? shown.slice(0, 200).map(rowHtml).join('') : `<div class="empty">${rows.length ? 'Nothing here.' : 'No companies yet. Run the credit scan on GitHub (mode credit); it takes about 5–10 minutes.'}</div>`}</div>
     ${shown.length > 200 ? `<p class="pHint">Showing the top 200 of ${shown.length}.</p>` : ''}
   </div>`;
@@ -71,6 +79,7 @@ function rowHtml(s) {
     : dt.some(t => /Convertible|Bonds/.test(t)) ? 'Opener: compare against <b>the private credit market</b>.'
     : 'Opener: compare against <b>the non-bank market</b> (if the 10-Q names a credit fund as lender: <b>the wider private credit market</b>).';
   if (dt.length) facts.unshift(`Debt <b>${dt.map(esc).join(' · ')}</b>`);
+  if ((s.tags || []).length) facts.unshift(`Lender fit <b>${s.tags.map(t => esc(tagTxt(t))).join(' · ')}</b>`);
   const ev = [f.forbearance && `<a href="${esc(f.forbearance.url)}" target="_blank" rel="noopener">Forbearance (${esc(f.forbearance.form)}) ↗</a>`,
     f.going_concern && `<a href="${esc(f.going_concern.url)}" target="_blank" rel="noopener">Going concern (${esc(f.going_concern.form)}) ↗</a>`,
     s.filing_url && `<a href="${esc(s.filing_url)}" target="_blank" rel="noopener">Latest 10-K/10-Q ↗</a>`].filter(Boolean);
@@ -104,6 +113,7 @@ function bind(shown) {
   bindContacts(el, 'credit', draw);
   $('#ctSetup', el)?.addEventListener('click', contactsSetup);
   $$('[data-view]', el).forEach(b => b.onclick = () => { view = b.dataset.view; draw(); });
+  $$('[data-tag]', el).forEach(b => b.onclick = () => { tag = b.dataset.tag; draw(); });
   $('#crHow', el).onclick = howModal;
   $$('[data-copy]', el).forEach(b => b.onclick = async () => {
     const t = opener(find(b.dataset.copy));
