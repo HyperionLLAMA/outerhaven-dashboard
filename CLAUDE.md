@@ -98,6 +98,10 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   `routines/brief.md` (lanes table = what OuterHaven is actually specialised in; size raises the bar; verdict strong / partial /
   none + who leads + angle) → `resource_jobs.payload.brief`; `syncBriefs()` copies it onto `people.brief` (`brief_ready_job`).
   Flag "No pre-meeting brief" (warn) on un-met people. Update the lanes table in brief.md when the team or offer changes.
+- **Moving cards (4 Nov 2026, Tengku couldn't undo a mis-click on Sonia):** drag a board card onto any column (`data-drag` / `data-drop`,
+  desktop; phones use the update window), and the last one-click / drag move shows "Moved X · Undo" in the board header (`lastMove`).
+  All moves go through `setStage()`. Moving a person back before `MET_FROM` clears `met_at` (mis-click), so they return to their owner.
+  The update window now redraws the board after Save (before, it only cleared the cache, so a saved move looked like it hadn't worked).
 - Migration `supabase/2026-11-04-lead-owners-rotation-brief.sql` (columns only; the To Reach Out stage move is an UPDATE the user runs).
 
 ## Deals (sidebar page `#/deals`, `hq/deals.js` `renderDealsPage`, admin only; 7 Oct 2026)

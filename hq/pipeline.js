@@ -37,6 +37,7 @@ export function leadHeat(l) {
   return { score: s, label: hot ? 'Wants to talk' : deal ? 'Has a deal' : '', tone: hot ? 'bad' : deal ? 'warn' : '' };
 }
 
+let lastMove = null; // the last one-click / drag move, so a mis-click is one tap to undo
 let root, D = null, loadedAt = 0, side = 'Sell Side', flt = null, showAllLeads = false, tab = 'need';
 const COL_CAP = 4, openCols = new Set(); // board columns show the 4 most urgent cards; "Show N more" expands one column
 
@@ -240,7 +241,7 @@ function draw() {
       ${meName() ? kpi('mine', 'my turn', k.mine.length, 'warn') : ''}${kpi('us', 'our move', k.us.length, 'bad')}${kpi('them', 'to chase', k.them.length, 'warn')}${kpi('nonext', 'no next step', k.nonext.length, 'warn')}${kpi('overdue', 'overdue', k.overdue.length, 'bad')}${kpi('leads', 'leads waiting', qualified, 'warn')}
     </div>
     <section class="card pSec pBoardCard ${inFlt.size ? 'filtering' : ''}"><header><div class="pSeg" role="group">${SIDES.map(s => `<button type="button" data-side="${s}" class="${side === s ? 'on' : ''}">${s}<em>${live.filter(i => i.side === s).length}</em></button>`).join('')}</div>
-      <p>${side === 'Both' ? 'Banks and advisers who are also capital. ' : ''}Click a card to update it.</p></header>
+      <p>${lastMove ? `<span class="pUndo">Moved ${esc(lastMove.name)} <button type="button" class="link s" data-undo>Undo</button></span>` : `${side === 'Both' ? 'Banks and advisers who are also capital. ' : ''}Drag a card to change its stage, or click it to update.`}</p></header>
       <div class="pBoard">${boardHtml(live, inFlt)}</div></section>
     <section class="card pSec" id="pNeed"><header class="pTabs">${tabs.map(([k, l, n]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${esc(l)}<em>${n}</em></button>`).join('')}</header>
       ${panel}</section>
@@ -276,7 +277,7 @@ function boardHtml(live, inFlt = new Set()) {
   const tpl = cols.map(c => c.items.length ? 'minmax(250px,1fr)' : 'minmax(120px,150px)').join(' ');
   return `<div class="pGrid" style="grid-template-columns:${tpl}">${cols.map((c, idx) => {
     const hot = c.items.filter(i => i.sev >= 3).length, total = c.items.reduce((n, i) => n + i.raise, 0);
-    return `<div class="pCol ${c.items.length ? '' : 'none'}"><h3><span class="n">${idx + 1}</span>${esc(c.name)}</h3>
+    return `<div class="pCol ${c.items.length ? '' : 'none'}" data-drop="${esc(c.name)}"><h3><span class="n">${idx + 1}</span>${esc(c.name)}</h3>
       <div class="pColSum"><b>${c.items.length}</b>${hot ? `<span class="pFlag bad">${hot} red</span>` : ''}${total ? `<span class="s muted">${money(total)}</span>` : ''}</div>
       ${boardCards(c, idx, inFlt)}</div>`;
   }).join('')}</div>`;
@@ -299,7 +300,7 @@ function cardHtml(i, hit) {
   const nx = nextStage(i), key = `${i.kind}:${i.id}`, size = i.raise ? money(i.raise) : i.size || '';
   const ballTxt = i.reach ? 'Not contacted' : i.has('touch') ? 'Follow-up due' : i.ball === 'us' ? 'Our move' : i.ball === 'them' ? 'Their move' : 'Nobody owns it';
   const tip = [i.sub, ...extra.map(f => f.text)].filter(Boolean).join(' · '); // detail lives in the tooltip and the click-through modal
-  return `<div role="button" tabindex="0" class="pCard pk ${hit ? 'hit' : ''}" data-sev="${i.sev}" data-upd="${key}"${tip ? ` title="${esc(tip)}"` : ''}>
+  return `<div role="button" tabindex="0" draggable="true" class="pCard pk ${hit ? 'hit' : ''}" data-sev="${i.sev}" data-upd="${key}" data-drag="${key}"${tip ? ` title="${esc(tip)}"` : ''}>
     <div class="pcHead"><b class="pcName">${esc(i.name)}</b>${size ? `<span class="pcSize">${esc(size)}</span>` : ''}</div>
     <div class="pkMeta"><span class="pkBall" data-tone="${tone2}">${ballTxt} · ${i.days}d</span>${extra.length ? `<span class="pkExtra ${extra[0].sev}">${extra.length > 1 ? `${extra.length} flags` : esc(extra[0].text)}</span>` : ''}<span class="pcAct">${hasDms(i) ? `<button type="button" class="pcLink" data-dm="${key}">DMs</button>` : ''}${nx ? `<button type="button" class="pkAdv" data-adv="${key}" title="Move to ${esc(nx)}" aria-label="Move to ${esc(nx)}">→</button>` : ''}</span></div>
     <div class="pkRow"><p class="pkNext ${nextTxt ? '' : 'none'}">${nextTxt ? esc(nextTxt) : 'No next step set'}</p>
@@ -335,6 +336,26 @@ function bind(all) {
   $('[data-more]', root)?.addEventListener('click', () => { showAllLeads = !showAllLeads; draw(); });
   $$('[data-col]', root).forEach(b => b.onclick = () => { const k = b.dataset.col; openCols.has(k) ? openCols.delete(k) : openCols.add(k); draw(); });
   $$('[data-upd]', root).forEach(b => { const open = () => { const i = find(b.dataset.upd); if (i) updateModal(i); }; b.onclick = open; b.onkeydown = e => { if (e.target === b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } }; });
+  // Drag and drop between stage columns (desktop). Phones use the update window.
+  let dragKey = null;
+  $$('[data-drag]', root).forEach(c => {
+    c.ondragstart = e => { dragKey = c.dataset.drag; c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragKey); };
+    c.ondragend = () => { c.classList.remove('dragging'); $$('.pCol.dropOk', root).forEach(x => x.classList.remove('dropOk')); };
+  });
+  $$('[data-drop]', root).forEach(col => {
+    col.ondragover = e => { if (!dragKey) return; e.preventDefault(); col.classList.add('dropOk'); };
+    col.ondragleave = e => { if (!col.contains(e.relatedTarget)) col.classList.remove('dropOk'); };
+    col.ondrop = async e => {
+      e.preventDefault(); col.classList.remove('dropOk');
+      const i = find(dragKey || e.dataTransfer.getData('text/plain')); dragKey = null;
+      if (i && await setStage(i, col.dataset.drop)) await reload();
+    };
+  });
+  $('[data-undo]', root)?.addEventListener('click', async () => {
+    const m = lastMove; lastMove = null; const i = find(m.key);
+    if (i && await setStage(i, m.from)) { lastMove = null; toast(`${m.name} back to ${m.from}`); }
+    await reload();
+  });
   $$('[data-adv]', root).forEach(b => b.onclick = async e => { e.stopPropagation(); const i = find(b.dataset.adv); if (!i) return; b.disabled = true; if (await advance(i)) await reload(); else b.disabled = false; });
   $$('[data-dm]', root).forEach(b => b.onclick = e => { e.stopPropagation(); const i = find(b.dataset.dm); if (i) dmModal({ name: i.person?.name || i.name, url: i.person?.linkedin_url, personId: i.person?.id, fallback: i.person?.last_inbound_message }); });
   $$('[data-teaser]', root).forEach(b => b.onclick = () => { const l = D.leads.find(x => x.id === b.dataset.teaser); if (l) teaserModal({ lead_intake_id: l.id, lead_name: l.name, lead_company: l.company_name, linkedin_url: l.linkedin_url }); });
@@ -381,7 +402,8 @@ async function logActivity(oppId, action) { await sb.from('activity').insert({ o
 // The lead keeps talking to whoever answers that inbox; no known account = the least-loaded person in the rotation.
 async function ownerFor(l) { return responderFor(l.source_account) || await pickOwner(); }
 // First meeting happened when a person reaches MET_FROM or beyond: stamp met_at once, which starts the rotation.
-const metPatch = (side, stage, p) => !p?.met_at && stageIdx(side, stage) >= stagesFor(side).indexOf(MET_FROM) ? { met_at: nowIso() } : {};
+// Moving back before it clears the stamp (it was a mis-click), so the lead goes back to its one owner.
+const metPatch = (side, stage, p) => { const after = stageIdx(side, stage) >= stagesFor(side).indexOf(MET_FROM); return !p?.met_at && after ? { met_at: nowIso() } : p?.met_at && !after ? { met_at: null } : {}; };
 async function promoteLead(l, sd) {
   const owner = await ownerFor(l);
   const now = nowIso(), key = slug(l.linkedin_url), lname = String(l.name || '').trim().toLowerCase();
@@ -407,15 +429,18 @@ async function rejectLead(l) {
 }
 
 // One click forward. The update window still lets you set any stage (or go back).
-async function advance(i) {
-  const nx = nextStage(i); if (!nx) return false;
+const advance = i => setStage(i, nextStage(i));
+async function setStage(i, nx) {
+  if (!nx || nx === i.stage) return false;
   const now = nowIso();
   if (i.kind === 'deal') {
     if (fail(await sb.from('opportunities').update({ pipeline_stage: nx, stage: nx, updated_at: now }).eq('id', i.id), 'Move')) return false;
     await logActivity(i.id, `Stage: ${i.stage || '—'} → ${nx}`);
     const mp = metPatch(i.side, nx, i.person); if (i.person && mp.met_at) await sb.from('people').update(mp).eq('id', i.person.id);
   } else if (fail(await sb.from('people').update({ pipeline_stage: nx, updated_at: now, ...metPatch(i.side, nx, i.person) }).eq('id', i.id), 'Move')) return false;
-  toast(metPatch(i.side, nx, i.person).met_at ? `${i.name} → ${nx}. Follow-ups now rotate ${ROTATION.join(' → ')}.` : `${i.name} → ${nx}`); return true;
+  toast(metPatch(i.side, nx, i.person).met_at ? `${i.name} → ${nx}. Follow-ups now rotate ${ROTATION.join(' → ')}.` : `${i.name} → ${nx}`);
+  lastMove = { key: `${i.kind}:${i.id}`, from: i.stage || 'New Relationship', name: i.name };
+  return true;
 }
 
 // Everything they've sent us: every reply the LinkedIn tool logged (full text), plus any thread saved with the HQ extension.
@@ -490,7 +515,7 @@ function updateModal(i) {
         if (stage !== i.stage) await logActivity(i.id, `Stage: ${i.stage || '—'} → ${stage}`);
         else if (ballChanged) await logActivity(i.id, ball === 'them' ? 'Waiting on them' : ball === 'us' ? 'Our move' : 'Ball cleared');
       } else if (fail(await sb.from('people').update({ ...base, ...pExtra, pipeline_stage: stage, primary_side: fd.get('side') || i.side, relationship_type: fd.get('side') && fd.get('side') !== i.side ? relType(fd.get('side')) : i.row.relationship_type }).eq('id', i.id), 'Save')) return false;
-      toast('Saved'); D = null; loadedAt = 0; refreshPipelineBadge();
+      toast('Saved'); reload();
     },
   });
   const f = $('.modal'), sd = $('[name=side]', f), stg = $('[name=stage]', f);
@@ -514,7 +539,7 @@ function addPersonModal() {
       const r = await sb.from('people').insert({ name: String(fd.get('name')).trim(), primary_side: sd, relationship_type: relType(sd), company_name: fd.get('co') || null, linkedin_url: fd.get('li') || null, has_linkedin: !!fd.get('li'), pipeline_stage: fd.get('stage') || 'New Relationship', owner_name: owner, pipeline_active: true, waiting_on: fd.get('ball'), waiting_on_since: now, created_by: state.user?.id }).select().single();
       if (fail(r, 'Add person')) return false;
       if (fd.get('next')) await sb.from('tasks').insert({ person_id: r.data.id, action: String(fd.get('next')).trim(), owner_name: owner, due_date: todayIso(), created_by: state.user?.id });
-      toast('Added'); D = null; loadedAt = 0; refreshPipelineBadge();
+      toast('Added'); reload();
     },
   });
 }

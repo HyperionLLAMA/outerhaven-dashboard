@@ -1466,3 +1466,6 @@ body,.card,.kpi,.checklist,.side{transition:background-color .2s,border-color .2
 .briefHead{font-family:var(--serif);font-size:var(--fs-l);margin:14px 0 8px}
 .briefFacts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 16px;margin:8px 0}
 .briefFacts dt{font-size:var(--fs-xs);color:var(--muted)}.briefFacts dd{margin:0;font-weight:500}
+.pCard.dragging{opacity:.45}
+.pCol.dropOk{outline:2px dashed var(--brass);outline-offset:4px;border-radius:8px}
+.pUndo{color:var(--ink)}
