@@ -1,5 +1,5 @@
 // HQ → Team access (admin only): who can sign in, and set a password for anyone (edge function team-admin).
-import { $, $$, esc, sb, modal, toast, opts, avatar } from './core.js';
+import { $, $$, esc, sb, modal, toast, opts, avatar, state, signOut } from './core.js';
 
 const WORDS = ['harbor', 'summit', 'cedar', 'falcon', 'meadow', 'granite', 'river', 'orchard', 'beacon', 'willow', 'canyon', 'atlas'];
 const easyPassword = () => {
@@ -36,6 +36,8 @@ function passwordModal({ email = '', isNew = false, onDone }) {
       const r = await call(body);
       if (!r?.ok) { toast(r?.error || 'Failed'); return false; }
       try { await navigator.clipboard.writeText(`${String(body.email).trim().toLowerCase()} / ${body.password}`); toast('Saved. Email + password copied.'); } catch { toast('Password saved.'); }
+      // A new password ends every session of that login, including this tab: sign in again instead of a confusing "Admins only".
+      if (String(body.email).trim().toLowerCase() === String(state.user?.email || '').toLowerCase()) { toast('Password changed. Sign in again with it.'); setTimeout(signOut, 1500); return; }
       onDone?.();
     },
   });
