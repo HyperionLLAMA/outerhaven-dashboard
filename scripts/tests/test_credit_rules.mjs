@@ -31,3 +31,19 @@ const lbra = classifyCredit({ ...base, debt_current: 22.8e6, cash: 0.4e6, revenu
 const evfm = classifyCredit({ ...base, cash: 0.3e6, revenue: 20.2e6, ebitda: 3.4e6, interest_expense: 2.4e6, public_float: 10e6, flags: gc });
 for (const r of [lbra, evfm]) { assert.equal(r.verdict, 'maybe'); assert.ok(r.tags.includes('check_data')); }
 console.log('credit rules ok', { ams: ams.score, dlh: dlh.score, xcf: xcf.score, hyfm: hyfm.score, spru: spru.score });
+// 7 Nov 2026 audit. Real maturity dates beat the balance sheet; no debt figure never reads as "bank will refinance";
+// a sub-$10M loan is cut; EBITDA $5M+ can pay a retainer.
+const inMonths = m => new Date(Date.now() + m * 30.44 * 864e5).toISOString().slice(0, 10);
+const mat = (...ms) => ({ maturities: { form: '10-Q', items: ms.map(m => ({ date: inMonths(m), quote: 'due' })) } });
+const healthy = { ...base, debt_noncurrent: 120e6, cash: 10e6, revenue: 150e6, ebitda: 25e6, interest_expense: 8e6, public_float: 200e6 };
+const due9 = classifyCredit({ ...healthy, flags: mat(9, 40) });
+assert.equal(due9.verdict, 'target'); assert.ok(due9.tags.includes('lane_refi') && due9.tags.includes('can_pay'));
+assert.equal(classifyCredit({ ...healthy, flags: mat(40) }).verdict, 'maybe', 'no maturity in 2 years = no trigger');
+assert.equal(classifyCredit({ ...healthy, flags: mat(2) }).verdict, 'maybe', 'under 4 months = too late');
+const ssk = classifyCredit({ ...healthy, debt_current: 158e6, cash: 133e6, flags: mat(36) });
+assert.equal(ssk.verdict, 'maybe', 'Shutterstock: current on the balance sheet, filing says 2029');
+assert.ok(!evfm.tags.includes('bank_refi'), 'Evofem: no debt figure is not net cash');
+const mtex = classifyCredit({ ...base, debt_current: 0.27e6, debt_noncurrent: 2.75e6, cash: 6.5e6, revenue: 108e6, ebitda: 0.67e6, public_float: 9.9e6, flags: gc });
+assert.equal(mtex.verdict, 'cut'); assert.ok(mtex.tags.includes('small_loan'));
+assert.ok(ams.tags.includes('lane_rescue'));
+console.log('audit cases ok', { due9: due9.score });

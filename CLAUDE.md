@@ -257,6 +257,13 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   and +5 years; one quote per date. Stored in `credit_signals.flags.maturities` {form, filed, url, items[{date, month_only, quote}]}
   (inside flags, so no server change). HQ card: ▲ "Matures <date>" + the quotes, or ✕ "No debt maturity in the next 2 years" (not a
   refinancing hook). Email hooks come from these quotes, checked against the filing before any send (Tengku's rule).
+- **List audit (7 Nov 2026, Tengku: 23 targets of 1,123):** ~780 cuts are right (241 SPACs, ~150 pre-revenue biotech, banks). The real
+  gap was the universe: only distressed companies were scanned. Now a **maturity watch** also reads every healthy lendable-size filer
+  ($20-300M debt, $20M-1B revenue, EBITDA > 0, float <= $2B) and keeps it only if its filing dates a maturity 4-24 months out.
+  CREDIT_RULES_VERSION 9: dated maturity = trigger (+25 / +20 / +10 at 12 / 18 / 24 months; under 4 = Maybe); balance-sheet "due" with
+  every filing maturity 2+ years out = Maybe; no debt figure no longer reads as net cash ("bank will refinance"); under $10M debt = cut
+  (`small_loan`); EBITDA $5M+ = `can_pay` +5; lanes as tags `lane_refi` / `lane_rescue`. New listings with no 10-K annualise the latest
+  10-Q (Lime / Neutron read as pre-revenue). Tests in test_credit_rules.mjs. Deploy fund-signals (index.ts + rules.js) for v9.
 
 ## BDC loans (Pipeline → BDC loans tab, `hq/bdc.js`, admin only; 8 Oct 2026)
 - The main private-company credit lane (UCC is now secondary). Private companies that borrow from BDCs, from the SEC's **BDC data sets**

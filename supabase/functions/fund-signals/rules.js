@@ -415,12 +415,13 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 8;
+export const CREDIT_RULES_VERSION = 9;
 // Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
 // cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
 export const CREDIT_TAGS = {
   lendable: 'Lendable', stretched: 'Highly levered', bank_refi: 'Bank will refinance', check_data: 'Check the numbers',
   burning_cash: 'Burning cash', over_levered: 'Over-levered', too_big: 'Too big', too_small: 'Too small', not_borrower: 'Not a borrower', chapter_11: 'In Chapter 11', non_us: 'Non-US',
+  lane_refi: 'Refinancing', lane_rescue: 'Rescue', can_pay: 'Can pay a retainer', small_loan: 'Loan too small',
 };
 export function normalizeCredit(it) {
   return {
@@ -449,12 +450,26 @@ export function classifyCredit(s) {
   if (s.state && !US.has(s.state)) tags.add('non_us'), add('maybe', `Non-US company (${s.state})`);
   let trigger = false;
   // Points (0-100): the refinancing deadline and lender stress matter most, then fit. Bigger gap = more urgent.
-  if (dc >= 10e6 && cash != null && dc > cash) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }
+  // Real maturity dates read from the latest 10-Q / 10-K text (scripts/maturities.py, 7 Nov 2026). The balance sheet's
+  // "due within 12 months" also counts revolvers and convertibles that mature years out (Bowman, Shutterstock, A10).
+  const mats = Array.isArray(f.maturities?.items) ? f.maturities.items : null;
+  const monthsTo = d => (Date.parse(d) - Date.now()) / (30.44 * 864e5);
+  const soon = mats ? mats.map(i => ({ ...i, m: monthsTo(i.date) })).filter(i => i.m >= 0 && i.m <= 24).sort((a, b) => a.m - b.m)[0] : null;
+  if (soon) {
+    trigger = true;
+    const on = new Date(soon.date).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    if (soon.m < 4) add('maybe', `Debt matures ${on} (filing text): under 4 months, likely already being refinanced`);
+    else add('good', `Debt matures ${on} (${f.maturities.form || 'filing'} text): a dated refinancing deadline`, soon.m <= 12 ? 25 : soon.m <= 18 ? 20 : 10);
+  }
+  const dueNow = dc >= 10e6 && cash != null && dc > cash;
+  if (dueNow && mats && mats.length && !soon) add('maybe', 'Balance sheet shows debt due within 12 months, but the filing dates every maturity 2+ years out: check the debt note');
+  if (dueNow) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }
   else if (dc >= 10e6 && cash != null && dc > 0.5 * cash) add('good', `${money(dc)} due within 12 months, ${Math.round(dc / cash * 100)}% of its cash${when}`, 10);
   // Rescue (3 Nov 2026, Tengku: the 100s were XCF / Hydrofarm with negative EBITDA): private credit refinances companies that
   // can pay interest, so distress only scores when cash flow can carry a new loan.
   const e = s.ebitda, ix = s.interest_expense, net = total - (cash || 0);
-  const lev = e > 0 ? net / e : null, cover = e > 0 && ix > 0 ? e / ix : null;
+  // No debt on file = no leverage figure (it used to read as net cash and get "bank will refinance").
+  const lev = e > 0 && total > 0 ? net / e : null, cover = e > 0 && ix > 0 ? e / ix : null;
   const rescue = e != null && (e <= 0 || (lev != null && (lev > 10 || (cover != null && cover < 1))));
   if (f.forbearance) { trigger = true; add('good', `Lender forbearance agreement (${f.forbearance.form} ${f.forbearance.date}): current lender is losing patience`, rescue ? 10 : 30); }
   if (f.going_concern) { trigger = true; add('good', `Going-concern doubt disclosed (${f.going_concern.form} ${f.going_concern.date}): needs rescue or bridge financing`, rescue ? 0 : 15); }
@@ -476,6 +491,12 @@ export function classifyCredit(s) {
     else if (lev != null && lev < 3 && (cover == null || cover >= 4)) tags.add('bank_refi'), add('info', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will likely refinance, lower priority`, -15);
   }
   if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) tags.add('lendable'), add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
+  // A loan under $10M is too small for Peter's lenders (Mannatech $3M, Aeries $1.6M were targets on a going-concern hit alone).
+  if (total > 0 && total < 10e6) tags.add('small_loan'), add('cut', `Only ${money(total)} of debt: too small a loan for private credit lenders`);
+  // Who can pay us (HI Mark lesson, 21 Oct): a retainer needs real cash flow; under $2M EBITDA it's success fee only.
+  if (e >= 5e6) tags.add('can_pay'), add('good', `EBITDA ${money(e)}: can pay a monthly retainer`, 5);
+  else if (e > 0 && e < 2e6) add('info', `EBITDA ${money(e)}: too thin for a retainer, success fee only`);
+  if (f.forbearance || f.going_concern) tags.add('lane_rescue'); else if (trigger) tags.add('lane_refi');
   // Numbers more than ~9 months old: the problem may already be fixed.
   if (s.period_end && Date.now() - Date.parse(s.period_end) > 270 * 864e5) add('info', `Balance sheet from ${s.period_end}: check the latest filing before calling`, -5);
   if (!trigger) add('maybe', 'No refinancing deadline, leverage problem, forbearance or going-concern warning found');

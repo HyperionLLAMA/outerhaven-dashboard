@@ -11,7 +11,8 @@ import { me } from './tasks.js';
 let el = null, rows = [], runs = [], view = 'target', tag = '', onCount = () => {};
 // Lender-fit tags from classifyCredit (rules.js CREDIT_TAGS). Symbol + word, never colour alone.
 const TAGS = { lendable: ['✓', 'Lendable'], stretched: ['⚠', 'Highly levered'], bank_refi: ['•', 'Bank will refinance'], check_data: ['?', 'Check the numbers'],
-  burning_cash: ['✕', 'Burning cash'], over_levered: ['✕', 'Over-levered'], too_big: ['✕', 'Too big'], too_small: ['✕', 'Too small'], not_borrower: ['✕', 'Not a borrower'], chapter_11: ['✕', 'In Chapter 11'], non_us: ['?', 'Non-US'] };
+  burning_cash: ['✕', 'Burning cash'], over_levered: ['✕', 'Over-levered'], too_big: ['✕', 'Too big'], too_small: ['✕', 'Too small'], not_borrower: ['✕', 'Not a borrower'], chapter_11: ['✕', 'In Chapter 11'], non_us: ['?', 'Non-US'],
+  lane_refi: ['▲', 'Refinancing'], lane_rescue: ['⚠', 'Rescue'], can_pay: ['✓', 'Can pay a retainer'], small_loan: ['✕', 'Loan too small'] };
 const tagTxt = k => TAGS[k] ? `${TAGS[k][0]} ${TAGS[k][1]}` : k;
 const money = n => n == null ? '—' : Math.abs(n) >= 1e9 ? '$' + +(n / 1e9).toFixed(1) + 'B' : Math.abs(n) >= 1e6 ? '$' + +(n / 1e6).toFixed(1) + 'M' : Math.abs(n) >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
 const day = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';

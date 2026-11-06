@@ -203,7 +203,17 @@ def annual_revenue(cik):
             days = (dt.date.fromisoformat(r["end"]) - dt.date.fromisoformat(r["start"])).days
             if 330 <= days <= 400 and (best_row is None or r["end"] > best_row["end"]):
                 best_row = r
-    return float(best_row["val"]) if best_row else 0.0
+    if best_row:
+        return float(best_row["val"])
+    # No 10-K yet (new listings: Lime / Neutron, Teamshares read as "pre-revenue"): annualise the latest 10-Q year-to-date.
+    q = None
+    for tag in REVENUE:
+        for r in ((facts.get(tag) or {}).get("units") or {}).get("USD", []):
+            if r.get("form") in ("10-Q", "10-Q/A") and r.get("start") and r.get("val"):
+                days = (dt.date.fromisoformat(r["end"]) - dt.date.fromisoformat(r["start"])).days
+                if 80 <= days <= 280 and (q is None or (r["end"], days) > (q[0]["end"], q[1])):
+                    q = (r, days)
+    return float(q[0]["val"]) * 365 / q[1] if q else 0.0
 
 
 def credit():
@@ -255,6 +265,15 @@ def credit():
             cands.add(c)
             lev += 1
     STATS["leverage_candidates"] = lev
+    # Maturity watch (7 Nov 2026 audit: 23 targets of 1,123 rows, because only distress made the list): healthy, lendable-size
+    # borrowers are read too, and kept only if their filing dates a maturity 4-24 months out. That is the refinancing lane.
+    watch = set()
+    for c in set(dnon) | set(dcur):
+        total = (val(dnon, c) or 0) + (val(dcur, c) or 0)
+        e, r, fl = ebitda(c), val(rev, c), val(flt, c)
+        if c not in cands and 20e6 <= total <= 300e6 and 20e6 <= (r or 0) <= 1e9 and e is not None and e > 0 and (fl is None or fl <= 2e9):
+            watch.add(c)
+    STATS["maturity_watch"] = len(watch)
     for c in set(forb) | set(gc):
         r = val(rev, c)
         if r is None or r >= 20e6:
@@ -273,8 +292,8 @@ def credit():
     STATS["revenue_looked_up"] = looked_up
     STATS["run"] = run
 
-    batch, sent = [], 0
-    for i, c in enumerate(sorted(cands)):
+    batch, sent, kept = [], 0, 0
+    for i, c in enumerate(sorted(cands | watch)):
         try:
             p = profile(c)
         except Exception as e:  # noqa: BLE001
@@ -282,6 +301,10 @@ def credit():
             if len(STATS["errors"]) < 20:
                 STATS["errors"].append(f"profile {c}: {str(e)[:120]}")
             p = {"name": (dcur.get(c) or cash.get(c) or rev.get(c) or (None,) * 4)[3] or f"CIK {c}"}
+        watch_only = c in watch
+        sic = int(p.get("sic") or 0)
+        if watch_only and (not p.get("filingUrl") or (6000 <= sic <= 6799 and sic != 6798)):  # banks / funds: not borrowers
+            continue
         flags = {}
         if c in forb:
             flags["forbearance"] = forb[c]
@@ -295,6 +318,12 @@ def credit():
                 flags["maturities"] = {"form": p.get("filingForm"), "filed": p.get("filingDate"), "url": p["filingUrl"], "items": items}
             except Exception as e:  # noqa: BLE001
                 log(f"  maturities {c}: {e}")
+        if watch_only:
+            soon = [m for m in (flags.get("maturities") or {}).get("items", [])
+                    if 120 <= (dt.date.fromisoformat(m["date"]) - today).days <= 730]
+            if not soon:
+                continue
+            kept += 1
         batch.append({"cik": c, **p, "periodEnd": (dcur.get(c) or cash.get(c) or (None, None))[1], "debtCurrent": val(dcur, c),
                       "debtNoncurrent": val(dnon, c), "revolverCurrent": val(rvl, c), "cash": val(cash, c), "revenue": val(rev, c), "publicFloat": val(flt, c), "flags": flags,
                       "ebitda": ebitda(c), "interestExpense": val(intx, c), "debtTypes": debt_types(c)})
@@ -314,7 +343,7 @@ def credit():
     else:
         r = post({"action": "ingest", "kind": "credit_done", "run": run})
         log(f"  dropped off this run: {r.get('dropped')}")
-    log(f"credit: done, {sent} companies sent")
+    log(f"credit: done, {sent} companies sent ({kept} of {len(watch)} watch companies have a maturity in 4-24 months)")
 
 
 if __name__ == "__main__":
