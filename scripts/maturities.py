@@ -20,7 +20,8 @@ HEDGE = re.compile(r"\b(swaps?|hedg\w*|interest rate (?:cap|collar)s?|derivative
 SCHEDULE = re.compile(r"\b(commenc\w*|beginning|through|installments?|interest payments?|payments? of)\b", re.I)
 OLD = re.compile(r"\b(was set to|originally|previously|had been|prior to)\b", re.I)  # biote "which was set to occur on"
 REVOLVER = re.compile(r"\b(revolv\w*|ABL|line of credit|borrowing base|credit facility)\b", re.I)
-TERM = re.compile(r"\b(term loans?|term debt|notes?|debentures?|bonds?)\b", re.I)
+TERM = re.compile(r"(?<!long-)(?<!short-)\b(term loans?|term debt|term facilit\w*|notes?|debentures?|bonds?)\b", re.I)  # not "LONG-TERM DEBT" headings (ESOA)
+JUNK = re.compile(r"xbrli:|iso4217:|us-gaap:|\bP\dY\b")  # inline XBRL header text, not a sentence (Regis)
 AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion)?", re.I)
 ABBR = {"inc", "corp", "co", "no", "ltd", "llc", "n.a", "s.a", "u.s", "jr", "sr", "st", "mr", "ms", "dr", "vs", "approx"}
 
@@ -69,7 +70,12 @@ def maturities(text, today, years=5, limit=8):
         if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(sent) or HEDGE.search(sent) \
                 or SCHEDULE.search(before[-60:]) or OLD.search(near) or not DEBT.search(sent):
             continue
+        if JUNK.search(sent):
+            continue
         amt = amount_m(sent)
+        if amt is None and a > 0:  # "The loan is due on ..." names its size in the sentence before (McEwen $2.1M, Jushi $1.4M)
+            pa, _ = sentence(text, max(0, a - 2), max(0, a - 2))
+            amt = amount_m(text[pa:a])
         kind = "term" if TERM.search(sent) else "revolver" if REVOLVER.search(sent) else "debt"
         seen.add(d)
         out.append({"date": d.isoformat(), "month_only": not day, "quote": sent[:400], "kind": kind,
@@ -117,4 +123,12 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     assert maturities(klxe, today)[0]["kind"] == "revolver"
     paai = "Amendment No. 4 amended the definition of \u201cMaturity Date\u201d for all of the Term Debt to the earlier of (i) December 31, 2027 or (ii) acceleration upon an event of default."
     assert [x["date"] for x in maturities(paai, today)] == ["2027-12-31"]
+    j2 = maturities(jush, today)
+    assert j2 and j2[0]["small"] is True, j2  # size is in the sentence before
+    mux2 = "with Andes Corporation Minera S.A., in respect of $ 2.1 million in previously advanced funds. The loan is due on February 29, 2028, and bears interest at a rate of 12 % per annum."
+    assert maturities(mux2, today)[0]["small"] is True
+    esoa = "SHORT-TERM AND LONG-TERM DEBT Revolving Credit Facility Effective June 28, 2026, the Company renewed its $ 30.0 million revolving line of credit with United Bank, which matures on June 28, 2028."
+    assert maturities(esoa, today)[0]["kind"] == "revolver"
+    rgs = "rgs-20260930 0000716643 FALSE 09/30 2027 Q1 P1Y xbrli:shares iso4217:USD loan matures January 29, 2028 us-gaap:CommonStockMember"
+    assert maturities(rgs, today) == []
     print("maturities: ok")

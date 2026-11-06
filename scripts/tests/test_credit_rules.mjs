@@ -62,3 +62,5 @@ assert.equal(paai.verdict, 'target', 'Paradium: going concern, cash flow, dated 
 const wd40 = classifyCredit({ ...healthy, debt_noncurrent: 85e6, cash: 60e6, ebitda: 112e6, interest_expense: 4e6, flags: mat(12) });
 assert.equal(wd40.verdict, 'maybe'); assert.ok(wd40.tags.includes('bank_refi'));
 console.log('v10 cases ok');
+assert.equal(classifyCredit({ ...healthy, debt_noncurrent: 50e6, cash: 160e6, ebitda: 23e6, interest_expense: 6e6, flags: mat(14) }).verdict, 'maybe', 'Akebia: net cash');
+console.log('net cash ok');

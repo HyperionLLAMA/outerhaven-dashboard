@@ -500,6 +500,8 @@ export function classifyCredit(s) {
     else if (lev != null && lev < 3 && (cover == null || cover >= 4) && !f.forbearance && !f.going_concern) tags.add('bank_refi'), add('maybe', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will refinance it, so it won't pay us`, -15);
   }
   if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) tags.add('lendable'), add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
+  // Net cash (Akebia, Vireo, Beachbody): it can repay the maturity from cash, no lender needed.
+  if (total > 0 && cash != null && cash >= total && !f.forbearance && !f.going_concern) tags.add('bank_refi'), add('maybe', `Cash ${money(cash)} covers all ${money(total)} of debt: it can repay without a new lender`);
   // A loan under $10M is too small for Peter's lenders (Mannatech $3M, Aeries $1.6M were targets on a going-concern hit alone).
   if (total > 0 && total < 10e6) tags.add('small_loan'), add('cut', `Only ${money(total)} of debt: too small a loan for private credit lenders`);
   // Who can pay us (HI Mark lesson, 21 Oct): a retainer needs real cash flow; under $2M EBITDA it's success fee only.
