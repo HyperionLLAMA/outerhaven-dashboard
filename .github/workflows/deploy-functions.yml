@@ -1,0 +1,41 @@
+# Deploys changed Supabase edge functions on every push to main (7 Nov 2026: Claude's connector can't deploy, so rule
+# changes sat undeployed). One-time setup by an admin: repo Settings → Secrets → Actions → SUPABASE_ACCESS_TOKEN
+# (supabase.com → Account → Access tokens). Without the secret the job skips. Run it by hand: Actions → Deploy functions.
+name: Deploy functions
+on:
+  push:
+    branches: [main]
+    paths: ["supabase/functions/**"]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "function names separated by spaces (blank = every function changed in the last commit)"
+        required: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: supabase/setup-cli@v1
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+      - name: Deploy
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: |
+          FNS="${{ github.event.inputs.only }}"
+          if [ -z "$FNS" ]; then
+            FNS=$(git diff --name-only HEAD~1 HEAD -- supabase/functions | cut -d/ -f3 | sort -u)
+          fi
+          for f in $FNS; do
+            [ -d "supabase/functions/$f" ] || continue
+            # verify_jwt as currently deployed (list_edge_functions, 7 Nov 2026); resource-request keeps JWT checks on
+            NOJWT=""; case "$f" in resource-request|prosp-backfill|prosp-backfill-browser|admin-reset-originator-test) ;; *) NOJWT="--no-verify-jwt";; esac
+            echo "deploying $f $NOJWT"
+            supabase functions deploy "$f" --project-ref nfcysxqdwpdhrdpgxrlo $NOJWT
+          done
+      - name: No token
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "::warning::SUPABASE_ACCESS_TOKEN is not set, nothing deployed"

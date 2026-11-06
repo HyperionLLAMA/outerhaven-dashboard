@@ -264,6 +264,14 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   every filing maturity 2+ years out = Maybe; no debt figure no longer reads as net cash ("bank will refinance"); under $10M debt = cut
   (`small_loan`); EBITDA $5M+ = `can_pay` +5; lanes as tags `lane_refi` / `lane_rescue`. New listings with no 10-K annualise the latest
   10-Q (Lime / Neutron read as pre-revenue). Tests in test_credit_rules.mjs. Deploy fund-signals (index.ts + rules.js) for v9.
+- **Hand check of 12 hooks (same day; 4 were not maturities: Orion's swap, Nuvera's amortisation schedule, NN's PIK election date, Jushi's
+  $1.4M acquisition note; biote's date was superseded):** `maturities.py` now reads whole sentences and skips swaps / hedges, payment
+  schedules (commencing / beginning / through / interest payments), superseded dates (was set to / originally / previously); each item
+  has `kind` (term | revolver | debt), `amount_m` (largest $ in the sentence; bare numbers = thousands) and `small` (< $5M, ignored).
+  CREDIT_RULES_VERSION 10: term / notes maturity = trigger; a revolver / ABL maturity only at net debt 3x+ (+10); regulated utilities
+  (SIC 4900-4949, 4961, 4991) cut; strong cash flow (< 3x, cover 4x+, no distress) = Maybe "its bank refinances it, so it won't pay us".
+  **Deploys:** `.github/workflows/deploy-functions.yml` deploys every changed function on push to main once an admin adds the repo secret
+  `SUPABASE_ACCESS_TOKEN` (never set it yourself); flags follow the deployed verify_jwt (resource-request keeps JWT on).
 
 ## BDC loans (Pipeline → BDC loans tab, `hq/bdc.js`, admin only; 8 Oct 2026)
 - The main private-company credit lane (UCC is now secondary). Private companies that borrow from BDCs, from the SEC's **BDC data sets**

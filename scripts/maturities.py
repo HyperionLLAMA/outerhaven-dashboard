@@ -9,16 +9,53 @@ import re
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 DATE = re.compile(r"\b(" + "|".join(MONTHS) + r")\s+(?:(\d{1,2}),\s*)?(20\d\d)\b")
-CUE = re.compile(r"\b(due|matur\w*|expir\w*|terminat\w*|repayable|extended)\b", re.I)
-DEBT = re.compile(r"\b(loans?|notes?|debentures?|credit agreement|revolv\w*|line of credit|facilit(?:y|ies)|borrowings?|indebtedness|bonds?)\b", re.I)
+CUE = re.compile(r"\b(matur\w*|due|expir\w*|terminat\w*|repayable|extended)\b", re.I)
+DEBT = re.compile(r"\b(loans?|notes?|debentures?|credit agreement|revolv\w*|line of credit|facilit(?:y|ies)|borrowings?|indebtedness|bonds?|term debt)\b", re.I)
 NOT_DEBT = re.compile(r"\b(leases?|warrants?|options?|awards?|vest\w*|settlement|lawsuit|contract with)\b", re.I)
 LENT_OUT = re.compile(r"\b(notes?|loans?) receivable\b|\breceivable from\b", re.I)  # money owed TO them, anywhere in the sentence
+# 7 Nov 2026 audit (Tengku: "check everything"): of 12 hooks read by hand, 4 were not a maturity at all.
+HEDGE = re.compile(r"\b(swaps?|hedg\w*|interest rate (?:cap|collar)s?|derivative)\b", re.I)  # Orion: a swap terminating
+# Nuvera "principal payments ... due commencing June 30, 2026, through March 31, 2028", NN "interest payments due before",
+# McEwen "due beginning on": payment schedules, not the date the debt has to be refinanced.
+SCHEDULE = re.compile(r"\b(commenc\w*|beginning|through|installments?|interest payments?|payments? of)\b", re.I)
+OLD = re.compile(r"\b(was set to|originally|previously|had been|prior to)\b", re.I)  # biote "which was set to occur on"
+REVOLVER = re.compile(r"\b(revolv\w*|ABL|line of credit|borrowing base|credit facility)\b", re.I)
+TERM = re.compile(r"\b(term loans?|term debt|notes?|debentures?|bonds?)\b", re.I)
+AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion)?", re.I)
+ABBR = {"inc", "corp", "co", "no", "ltd", "llc", "n.a", "s.a", "u.s", "jr", "sr", "st", "mr", "ms", "dr", "vs", "approx"}
+
+
+def sentence(text, i, j):
+    """Bounds of the sentence holding text[i:j] (a full stop + space + capital, not after Inc. / N.A. / No.)."""
+    a = 0
+    for m in re.finditer(r"\.\s+(?=[A-Z(\"“])", text[max(0, i - 600):i]):
+        word = re.search(r"([A-Za-z.]+)$", text[max(0, i - 600):i][:m.start()])
+        if not word or word.group(1).lower().rstrip(".") not in ABBR:
+            a = max(0, i - 600) + m.end()
+    b = len(text)
+    for m in re.finditer(r"\.\s+(?=[A-Z(\"“])|\.$", text[j:j + 400]):
+        word = re.search(r"([A-Za-z.]+)$", text[j:j + 400][:m.start()])
+        if not word or word.group(1).lower().rstrip(".") not in ABBR:
+            b = j + m.start() + 1
+            break
+    return a, min(b, j + 400)
+
+
+def amount_m(sent):
+    """Largest dollar amount in the sentence, in $M. A bare number is read as thousands (how 10-Q tables state debt)."""
+    best = None
+    for m in AMOUNT.finditer(sent):
+        v = float(m.group(1).replace(",", ""))
+        v = v * 1000 if (m.group(2) or "").lower() == "billion" else v if m.group(2) else v / 1000
+        best = v if best is None else max(best, v)
+    return best
 
 
 def maturities(text, today, years=5, limit=8):
-    """[{date, month_only, quote}] sorted by date: debt maturities between today and `years` ahead, one per date."""
+    """[{date, month_only, quote, kind, amount_m, small}] sorted by date: debt maturities from today to `years` ahead."""
+    text = " ".join((text or "").split())
     out, seen = [], set()
-    for m in DATE.finditer(text or ""):
+    for m in DATE.finditer(text):
         month, day, year = MONTHS.index(m.group(1)) + 1, m.group(2), int(m.group(3))
         try:
             d = dt.date(year, month, int(day) if day else 1)
@@ -26,15 +63,17 @@ def maturities(text, today, years=5, limit=8):
             continue
         if d < today or d > today.replace(year=today.year + years) or d in seen:
             continue
-        before = text[max(0, m.start() - 160):m.start()]
+        a, b = sentence(text, m.start(), m.end())
+        sent, before = text[a:b], text[a:m.start()]
         near = before[-90:]
-        if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(before) or not DEBT.search(before + text[m.end():m.end() + 40]):
+        if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(sent) or HEDGE.search(sent) \
+                or SCHEDULE.search(before[-60:]) or OLD.search(near) or not DEBT.search(sent):
             continue
-        a, b = max(0, m.start() - 160), min(len(text), m.end() + 60)
-        a = text.find(" ", a) + 1 if a else 0
-        b = text.rfind(" ", m.end(), b) if text.rfind(" ", m.end(), b) > m.end() else b
+        amt = amount_m(sent)
+        kind = "term" if TERM.search(sent) else "revolver" if REVOLVER.search(sent) else "debt"
         seen.add(d)
-        out.append({"date": d.isoformat(), "month_only": not day, "quote": " ".join(text[a:b].split())})
+        out.append({"date": d.isoformat(), "month_only": not day, "quote": sent[:400], "kind": kind,
+                    "amount_m": round(amt, 1) if amt is not None else None, "small": amt is not None and amt < 5})
     return sorted(out, key=lambda x: x["date"])[:limit]
 
 
@@ -57,4 +96,25 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     assert maturities(bwmn, today) == []  # Bowman lent this out: not its debt
     abl = "The ABL Revolver, secured by eligible accounts receivable and inventory, matures on October 28, 2027."
     assert [x["date"] for x in maturities(abl, today)] == ["2027-10-28"]  # an ABL backed by receivables is still their debt
+    # 7 Nov 2026 audit: real quotes that were wrongly taken as maturities.
+    orn = "on a portion of its variable-rate borrowings. The swap became effective on July 1, 2026 with a notional amount of $ 20 million. The swap terminates on July 1, 2027. Under the swap, the Company pays a fixed rate of 4.03 %"
+    assert maturities(orn, today) == []
+    nuvr = "The final maturity date of this note is June 21, 2029. Eight quarterly principal payments of $ 781,250 are due commencing June 30, 2026, through March 31, 2028, and four quarterly principal payments of $ 1,562,500"
+    assert [x["date"] for x in maturities(nuvr, today)] == ["2029-06-21"]
+    nnbr = "plus an applicable margin ranging from 7.75 % to 8.75 % based on our Consolidated Net Leverage Ratio. For interest payments due before April 16, 2027, we may elect to pay a portion of interest in-kind (PIK)."
+    assert maturities(nnbr, today) == []
+    btmd = "with repayment of the outstanding amount of the note due on maturity, which was set to occur on May 26, 2027. Pursuant to the Credit Agreement, the Company may borrow"
+    assert maturities(btmd, today) == []
+    mux = "On January 31, 2025, the outstanding $ 40.0 million loan was refinanced, extending the repayment of principal by 24 months, and is due beginning on January 31, 2027, with the remaining principal due later."
+    assert maturities(mux, today) == []
+    jush = "The consideration included $ 1,400 in aggregate promissory notes. The promissory notes bear interest at a stated rate of 10 % per annum, are payable quarterly in cash, and mature in April 2027."
+    j = maturities("The consideration included $ 1,400 in aggregate promissory notes, which mature in April 2027.", today)
+    assert j and j[0]["small"] is True, j  # $1.4M acquisition note: not their real debt
+    glxz = "Pursuant to the terms of the Credit Agreement, the new term loan and new revolving credit facility will mature on January 6, 2028 as the merger was not completed."
+    g = maturities(glxz, today)
+    assert [x["date"] for x in g] == ["2028-01-06"] and g[0]["kind"] == "term", g
+    klxe = "Our 2028 ABL Facility matures on March 7, 2028 and we intend to work with our existing lenders or other lenders."
+    assert maturities(klxe, today)[0]["kind"] == "revolver"
+    paai = "Amendment No. 4 amended the definition of \u201cMaturity Date\u201d for all of the Term Debt to the earlier of (i) December 31, 2027 or (ii) acceleration upon an event of default."
+    assert [x["date"] for x in maturities(paai, today)] == ["2027-12-31"]
     print("maturities: ok")

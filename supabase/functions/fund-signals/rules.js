@@ -415,7 +415,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 9;
+export const CREDIT_RULES_VERSION = 10;
 // Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
 // cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
 export const CREDIT_TAGS = {
@@ -438,6 +438,8 @@ export function classifyCredit(s) {
   const dc = s.debt_current, cash = s.cash, total = (s.debt_current || 0) + (s.debt_noncurrent || 0);
   const when = s.period_end ? ` (balance sheet ${s.period_end})` : '';
   if (sic >= 6000 && sic <= 6799 && sic !== 6798) tags.add('not_borrower'), add('cut', `Bank, insurer or fund (${s.sic_desc || 'SIC ' + sic}): not a borrower for us`);
+  // Regulated utilities (water, gas, electric) borrow cheaply in their own markets and don't hire a private credit adviser.
+  if ((sic >= 4900 && sic <= 4949) || sic === 4961 || sic === 4991) tags.add('not_borrower'), add('cut', `Regulated utility (${s.sic_desc || 'SIC ' + sic}): borrows cheaply in its own markets, won't hire us`);
   if (s.on_latest === false) add('cut', 'No longer on the latest scan: its numbers stopped showing a trigger (earlier runs counted revolving lines as debt due)');
   if (/(^|,\s*)[A-Z]{4}Q(,|$)/.test(s.tickers || '')) tags.add('chapter_11'), add('cut', 'Ticker ends in Q: already in Chapter 11, its rescue lenders are set');
   if (s.revenue == null) add('maybe', 'Revenue not found in its filings');
@@ -454,15 +456,22 @@ export function classifyCredit(s) {
   // "due within 12 months" also counts revolvers and convertibles that mature years out (Bowman, Shutterstock, A10).
   const mats = Array.isArray(f.maturities?.items) ? f.maturities.items : null;
   const monthsTo = d => (Date.parse(d) - Date.now()) / (30.44 * 864e5);
-  const soon = mats ? mats.map(i => ({ ...i, m: monthsTo(i.date) })).filter(i => i.m >= 0 && i.m <= 24).sort((a, b) => a.m - b.m)[0] : null;
+  // v10 (7 Nov audit): items under $5M (Jushi's $1.4M acquisition note) are not the company's real debt.
+  const real = mats ? mats.filter(i => !i.small) : null;
+  const soon = real ? real.map(i => ({ ...i, m: monthsTo(i.date) })).filter(i => i.m >= 0 && i.m <= 24).sort((a, b) => (a.kind === 'revolver') - (b.kind === 'revolver') || a.m - b.m)[0] : null;
+  // Leverage is needed before the maturity can be judged: a revolver at a strong earner just gets renewed by its bank.
+  const e0 = s.ebitda, lev0 = e0 > 0 && total > 0 ? (total - (cash || 0)) / e0 : null;
   if (soon) {
-    trigger = true;
     const on = new Date(soon.date).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-    if (soon.m < 4) add('maybe', `Debt matures ${on} (filing text): under 4 months, likely already being refinanced`);
-    else add('good', `Debt matures ${on} (${f.maturities.form || 'filing'} text): a dated refinancing deadline`, soon.m <= 12 ? 25 : soon.m <= 18 ? 20 : 10);
+    const src = `${f.maturities.form || 'filing'} text`;
+    if (soon.m < 4) { trigger = true; add('maybe', `Debt matures ${on} (${src}): under 4 months, likely already being refinanced`); }
+    else if (soon.kind === 'revolver') {
+      if (lev0 != null && lev0 >= 3) { trigger = true; add('good', `Revolving facility matures ${on} (${src}): a renewal its bank may not simply roll at this leverage`, 10); }
+      else add('info', `Revolving facility matures ${on} (${src}): usually renewed by its bank`);
+    } else { trigger = true; add('good', `Debt matures ${on} (${src}): a dated refinancing deadline`, soon.m <= 12 ? 25 : soon.m <= 18 ? 20 : 10); }
   }
   const dueNow = dc >= 10e6 && cash != null && dc > cash;
-  if (dueNow && mats && mats.length && !soon) add('maybe', 'Balance sheet shows debt due within 12 months, but the filing dates every maturity 2+ years out: check the debt note');
+  if (dueNow && real && real.length && !soon) add('maybe', 'Balance sheet shows debt due within 12 months, but the filing dates every maturity 2+ years out: check the debt note');
   if (dueNow) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }
   else if (dc >= 10e6 && cash != null && dc > 0.5 * cash) add('good', `${money(dc)} due within 12 months, ${Math.round(dc / cash * 100)}% of its cash${when}`, 10);
   // Rescue (3 Nov 2026, Tengku: the 100s were XCF / Hydrofarm with negative EBITDA): private credit refinances companies that
@@ -488,7 +497,7 @@ export function classifyCredit(s) {
     else if (rescue) { trigger = true; tags.add('over_levered'); add('cut', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
     else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { tags.add('stretched'); trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
     else if (lev != null && lev >= 5) tags.add('stretched'), add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
-    else if (lev != null && lev < 3 && (cover == null || cover >= 4)) tags.add('bank_refi'), add('info', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will likely refinance, lower priority`, -15);
+    else if (lev != null && lev < 3 && (cover == null || cover >= 4) && !f.forbearance && !f.going_concern) tags.add('bank_refi'), add('maybe', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will refinance it, so it won't pay us`, -15);
   }
   if (lev != null && lev >= 3 && lev < 7 && (cover == null || cover >= 1.2)) tags.add('lendable'), add('good', `Lendable: net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}, cash flow a private credit lender can refinance`, 10);
   // A loan under $10M is too small for Peter's lenders (Mannatech $3M, Aeries $1.6M were targets on a going-concern hit alone).

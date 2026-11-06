@@ -47,3 +47,18 @@ const mtex = classifyCredit({ ...base, debt_current: 0.27e6, debt_noncurrent: 2.
 assert.equal(mtex.verdict, 'cut'); assert.ok(mtex.tags.includes('small_loan'));
 assert.ok(ams.tags.includes('lane_rescue'));
 console.log('audit cases ok', { due9: due9.score });
+// v10 (7 Nov 2026, hand check of 12 hooks): small items ignored, revolvers only count at 3x+, utilities cut,
+// strong earners go to Maybe (their bank refinances), going concern with cash flow stays a target (Paradium).
+const item = (m, extra) => ({ date: inMonths(m), quote: 'x', ...extra });
+const withItems = (...its) => ({ maturities: { form: '10-Q', items: its } });
+assert.equal(classifyCredit({ ...healthy, flags: withItems(item(5, { small: true })) }).verdict, 'maybe', 'Jushi: $1.4M note is no hook');
+const klxe = classifyCredit({ ...healthy, flags: withItems(item(16, { kind: 'revolver' })) });
+assert.equal(klxe.verdict, 'target', 'ABL maturing at 4.4x counts');
+const nrc = classifyCredit({ ...healthy, ebitda: 40e6, interest_expense: 5e6, flags: withItems(item(15, { kind: 'revolver' })) });
+assert.equal(nrc.verdict, 'maybe', 'revolver at a strong earner: bank renews');
+assert.equal(classifyCredit({ ...healthy, sic: '4941', flags: mat(6) }).verdict, 'cut', 'water utility');
+const paai = classifyCredit({ ...healthy, debt_noncurrent: 98e6, cash: 11e6, ebitda: 44e6, interest_expense: 9e6, flags: { ...gc, ...withItems(item(13, { kind: 'term' })) } });
+assert.equal(paai.verdict, 'target', 'Paradium: going concern, cash flow, dated term debt');
+const wd40 = classifyCredit({ ...healthy, debt_noncurrent: 85e6, cash: 60e6, ebitda: 112e6, interest_expense: 4e6, flags: mat(12) });
+assert.equal(wd40.verdict, 'maybe'); assert.ok(wd40.tags.includes('bank_refi'));
+console.log('v10 cases ok');
