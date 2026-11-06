@@ -11,8 +11,8 @@ let stageF = '', stratF = ''; // filters: '' = all
 const STAGE = { closed: ['Closed', 'good', 'Current fund has finished raising: the next-fund pitch fits'], stuck: ['Stuck raising', 'good', 'Current fund still open 12+ months in: pitch placement on this fund'], raising: ['Still raising', 'warn', 'Current fund open under 12 months: too early to pitch'], unclear: ['Close unclear', '', 'No proof yet that the current fund has closed: confirm on the first call'] };
 const STRAT = { credit: 'Private credit', real_estate: 'Real estate', infra: 'Infra / energy', venture: 'Venture', buyout: 'Buyout / PE', other: 'Other' };
 const DAY = 864e5;
-const GH_RUN = 'https://github.com/chasehamby123/outerhaven-dashboard/actions/workflows/fund-signals.yml';
-const GH_SECRETS = 'https://github.com/chasehamby123/outerhaven-dashboard/settings/secrets/actions';
+const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard/actions/workflows/fund-signals.yml';
+const GH_SECRETS = 'https://github.com/HyperionLLAMA/outerhaven-dashboard/settings/secrets/actions';
 const money = n => n == null ? '—' : n >= 1e9 ? '$' + +(n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? '$' + +(n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
 const day = v => v ? new Date(v + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];

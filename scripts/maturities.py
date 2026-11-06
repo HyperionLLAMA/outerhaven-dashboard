@@ -29,7 +29,7 @@ ABBR = {"inc", "corp", "co", "no", "ltd", "llc", "n.a", "s.a", "u.s", "jr", "sr"
 
 def sentence(text, i, j):
     """Bounds of the sentence holding text[i:j] (a full stop + space + capital, not after Inc. / N.A. / No.)."""
-    a = 0
+    a = max(0, i - 200)  # no full stop in 600 chars: a window that keeps the date in the 400-char quote, never the top of the document (Regis)
     for m in re.finditer(r"\.\s+(?=[A-Z(\"“])", text[max(0, i - 600):i]):
         word = re.search(r"([A-Za-z.]+)$", text[max(0, i - 600):i][:m.start()])
         if not word or word.group(1).lower().rstrip(".") not in ABBR:
@@ -132,6 +132,12 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     assert maturities(esoa, today)[0]["kind"] == "revolver"
     rgs = "rgs-20260930 0000716643 FALSE 09/30 2027 Q1 P1Y xbrli:shares iso4217:USD loan matures January 29, 2028 us-gaap:CommonStockMember"
     assert maturities(rgs, today) == []
+    import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from officers import text_of  # Regis's dates sit in ix:header hidden facts: stripped, the real note sentence is quoted
+    rgs_html = ('<div style="display:none"><ix:header><ix:hidden><ix:nonNumeric name="us-gaap:DebtInstrumentMaturityDate">loan matures January 29, 2028'
+                '</ix:nonNumeric></ix:hidden></ix:header></div><p>' + "x " * 400 + 'Our term loan matures on January 29, 2028 under the Credit Agreement.</p>')
+    r = maturities(text_of(rgs_html), today)
+    assert [x["date"] for x in r] == ["2028-01-29"] and "rgs-" not in r[0]["quote"] and "January 29, 2028" in r[0]["quote"], r
     klxe2 = "We issued warrants for $ 1.0 million. Our 2028 ABL Facility matures on March 7, 2028 and we intend to refinance it."
     assert maturities(klxe2, today)[0]["small"] is False  # only "The loan / The notes ..." borrow the size from before
     glxz_old = "On January 6, 2025, the Company replaced the senior secured term loan agreement with Fortress Credit Corp., which included a term loan with a maturity date of November 13, 2026. On January 6, 2025, the Company borrowed $ 45,000,000"

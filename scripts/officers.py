@@ -53,7 +53,8 @@ def sec_get(url, as_json=False):
 
 
 def text_of(raw):
-    t = re.sub(r"(?is)<(script|style).*?</\1>", " ", raw or "")
+    # ix:header = hidden inline XBRL facts and contexts, never prose (Regis tags its maturity dates there)
+    t = re.sub(r"(?is)<(script|style|ix:header)\b.*?</\1>", " ", raw or "")
     t = re.sub(r"(?s)<[^>]+>", " ", t)
     return re.sub(r"\s+", " ", html.unescape(t)).strip()
 
