@@ -23,6 +23,20 @@ REPLACED = re.compile(r"\b(replaced|terminated|repaid in full)\b.*\bwhich (inclu
 REVOLVER = re.compile(r"\b(revolv\w*|ABL|line of credit|borrowing base|credit facility)\b", re.I)
 TERM = re.compile(r"(?<!long-)(?<!short-)\b(term loans?|term debt|term facilit\w*|notes?|debentures?|bonds?)\b", re.I)  # not "LONG-TERM DEBT" headings (ESOA)
 JUNK = re.compile(r"xbrli:|iso4217:|us-gaap:|\bP\dY\b")  # inline XBRL header text, not a sentence (Regis)
+# Paradium 10-Q (7 Nov 2026): the notes date the Term Debt Dec 2027, but Subsequent Events says a new agreement "replaced the Term Debt
+# and the Simplify Loan" and "extended the maturity of the Term Debt by three years". Instruments named there lose their dates.
+NAME = r"(?:the\s+)?([A-Z][\w-]*(?:\s+[A-Z][\w-]*){0,3})"
+SUPERSEDED = re.compile(r"\b(?:replaced|refinanced|repaid in full|extended the maturity of)\s+" + NAME + r"(?:\s+and\s+" + NAME + r")?")
+
+
+def superseded(text):
+    """Instrument names the last Subsequent Events note says were replaced, refinanced, repaid or extended."""
+    i = text.rfind("Subsequent Event")
+    if i < 0:
+        return set()
+    return {n for m in SUPERSEDED.finditer(text[i:i + 4000]) for n in m.groups() if n and n not in ("Company", "The Company")}
+
+
 AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion)?", re.I)
 ABBR = {"inc", "corp", "co", "no", "ltd", "llc", "n.a", "s.a", "u.s", "jr", "sr", "st", "mr", "ms", "dr", "vs", "approx"}
 
@@ -56,7 +70,7 @@ def amount_m(sent):
 def maturities(text, today, years=5, limit=8):
     """[{date, month_only, quote, kind, amount_m, small}] sorted by date: debt maturities from today to `years` ahead."""
     text = " ".join((text or "").split())
-    out, seen = [], set()
+    out, seen, gone = [], set(), superseded(text)
     for m in DATE.finditer(text):
         month, day, year = MONTHS.index(m.group(1)) + 1, m.group(2), int(m.group(3))
         try:
@@ -71,7 +85,7 @@ def maturities(text, today, years=5, limit=8):
         if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(sent) or HEDGE.search(sent) \
                 or SCHEDULE.search(before[-60:]) or OLD.search(near) or REPLACED.search(before) or not DEBT.search(sent):
             continue
-        if JUNK.search(sent):
+        if JUNK.search(sent) or any(g in sent for g in gone):
             continue
         amt = amount_m(sent)
         if amt is None and a > 0 and re.match(r"(The|This|These|Such) (loan|notes?|promissory notes?)\b", sent):  # "The loan is due on ..." names its size in the sentence before (McEwen $2.1M, Jushi $1.4M)
@@ -143,4 +157,9 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     glxz_old = "On January 6, 2025, the Company replaced the senior secured term loan agreement with Fortress Credit Corp., which included a term loan with a maturity date of November 13, 2026. On January 6, 2025, the Company borrowed $ 45,000,000"
     assert maturities(glxz_old, today) == []
     assert maturities("In March 2026 the Company refinanced its credit facility, and the new term loan matures on June 30, 2028.", today)  # a refinanced loan's NEW date stays
+    paai_full = (paai + " On December 31, 2025, the Company entered into Amendment No. 2 to the Simplify Loan, which extended the maturity date to December 1, 2027. "
+                 "20. Subsequent Events Term Debt and Simplify Loan Effective August 7, 2026, the Company entered into a new debt agreement with Renew, which "
+                 "replaced the Term Debt and the Simplify Loan. The new debt agreement extended the maturity of the Term Debt by three years.")
+    assert maturities(paai_full, today) == [], maturities(paai_full, today)
+    assert [x["date"] for x in maturities(glxz + " Subsequent Events None.", today)] == ["2028-01-06"]  # a note with nothing replaced keeps dates
     print("maturities: ok")
