@@ -18,7 +18,8 @@ HEDGE = re.compile(r"\b(swaps?|hedg\w*|interest rate (?:cap|collar)s?|derivative
 # Nuvera "principal payments ... due commencing June 30, 2026, through March 31, 2028", NN "interest payments due before",
 # McEwen "due beginning on": payment schedules, not the date the debt has to be refinanced.
 SCHEDULE = re.compile(r"\b(commenc\w*|beginning|through|installments?|interest payments?|payments? of)\b", re.I)
-OLD = re.compile(r"\b(was set to|originally|previously|had been|prior to)\b", re.I)  # biote "which was set to occur on"
+OLD = re.compile(r"\b(was set to|originally|previously|had been|prior to)\b", re.I)
+REPLACED = re.compile(r"\b(replaced|terminated|repaid in full)\b.*\bwhich (included|provided)\b", re.I)  # Galaxy: the old Fortress loan's date  # biote "which was set to occur on"
 REVOLVER = re.compile(r"\b(revolv\w*|ABL|line of credit|borrowing base|credit facility)\b", re.I)
 TERM = re.compile(r"(?<!long-)(?<!short-)\b(term loans?|term debt|term facilit\w*|notes?|debentures?|bonds?)\b", re.I)  # not "LONG-TERM DEBT" headings (ESOA)
 JUNK = re.compile(r"xbrli:|iso4217:|us-gaap:|\bP\dY\b")  # inline XBRL header text, not a sentence (Regis)
@@ -68,7 +69,7 @@ def maturities(text, today, years=5, limit=8):
         sent, before = text[a:b], text[a:m.start()]
         near = before[-90:]
         if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(sent) or HEDGE.search(sent) \
-                or SCHEDULE.search(before[-60:]) or OLD.search(near) or not DEBT.search(sent):
+                or SCHEDULE.search(before[-60:]) or OLD.search(near) or REPLACED.search(before) or not DEBT.search(sent):
             continue
         if JUNK.search(sent):
             continue
@@ -133,4 +134,7 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     assert maturities(rgs, today) == []
     klxe2 = "We issued warrants for $ 1.0 million. Our 2028 ABL Facility matures on March 7, 2028 and we intend to refinance it."
     assert maturities(klxe2, today)[0]["small"] is False  # only "The loan / The notes ..." borrow the size from before
+    glxz_old = "On January 6, 2025, the Company replaced the senior secured term loan agreement with Fortress Credit Corp., which included a term loan with a maturity date of November 13, 2026. On January 6, 2025, the Company borrowed $ 45,000,000"
+    assert maturities(glxz_old, today) == []
+    assert maturities("In March 2026 the Company refinanced its credit facility, and the new term loan matures on June 30, 2028.", today)  # a refinanced loan's NEW date stays
     print("maturities: ok")

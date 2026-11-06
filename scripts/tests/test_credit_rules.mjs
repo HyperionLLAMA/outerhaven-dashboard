@@ -64,3 +64,6 @@ assert.equal(wd40.verdict, 'maybe'); assert.ok(wd40.tags.includes('bank_refi'));
 console.log('v10 cases ok');
 assert.equal(classifyCredit({ ...healthy, debt_noncurrent: 50e6, cash: 160e6, ebitda: 23e6, interest_expense: 6e6, flags: mat(14) }).verdict, 'maybe', 'Akebia: net cash');
 console.log('net cash ok');
+const glx = classifyCredit({ ...healthy, flags: withItems(item(0.3, { kind: 'term' }), item(14, { kind: 'term' })) });
+assert.equal(glx.verdict, 'target', 'Galaxy: an old Nov 2026 date must not hide the Jan 2028 maturity');
+console.log('galaxy ok');

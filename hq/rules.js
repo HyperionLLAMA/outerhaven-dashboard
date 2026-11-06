@@ -1,6 +1,6 @@
 // Rules page (#/rules, admin): every qualification rule behind the signal tabs, in plain words, with the same
 // Need / Risk / Fit / Check / Cut labels the tabs use. Written from the rules files on the server:
-//   supabase/functions/bdc-signals/rules.js (BDC_RULES_VERSION 6), fund-signals/rules.js (classifyCredit v10, fund v15),
+//   supabase/functions/bdc-signals/rules.js (BDC_RULES_VERSION 6), fund-signals/rules.js (classifyCredit v11, fund v15),
 //   ucc-signals/rules.js (UCC_RULES_VERSION 4). When a rule changes there, change it here in the same commit.
 import { esc } from './core.js';
 import { KINDS, kindLegend } from './kinds.js';

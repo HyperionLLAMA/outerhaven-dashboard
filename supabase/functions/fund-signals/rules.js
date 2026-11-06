@@ -415,7 +415,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 10;
+export const CREDIT_RULES_VERSION = 11;
 // Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
 // cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
 export const CREDIT_TAGS = {
@@ -458,7 +458,7 @@ export function classifyCredit(s) {
   const monthsTo = d => (Date.parse(d) - Date.now()) / (30.44 * 864e5);
   // v10 (7 Nov audit): items under $5M (Jushi's $1.4M acquisition note) are not the company's real debt.
   const real = mats ? mats.filter(i => !i.small) : null;
-  const soon = real ? real.map(i => ({ ...i, m: monthsTo(i.date) })).filter(i => i.m >= 0 && i.m <= 24).sort((a, b) => (a.kind === 'revolver') - (b.kind === 'revolver') || a.m - b.m)[0] : null;
+  const soon = real ? real.map(i => ({ ...i, m: monthsTo(i.date) })).filter(i => i.m >= 0 && i.m <= 24).sort((a, b) => (a.m < 4) - (b.m < 4) || (a.kind === 'revolver') - (b.kind === 'revolver') || a.m - b.m)[0] : null;  // a stale under-4-month date never hides a real later one (Galaxy)
   // Leverage is needed before the maturity can be judged: a revolver at a strong earner just gets renewed by its bank.
   const e0 = s.ebitda, lev0 = e0 > 0 && total > 0 ? (total - (cash || 0)) / e0 : null;
   if (soon) {
