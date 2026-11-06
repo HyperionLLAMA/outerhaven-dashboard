@@ -222,5 +222,40 @@ def main():
         sys.exit(1)
 
 
+def probe(ciks):
+    """Pre-send check for an outreach email (7 Nov 2026, Tengku): per company, the latest 10-Q/10-K's maturity sentences as
+    they read in the filing today, who signed the certifications, and every CEO/CFO change in a 5.02 8-K this past year.
+    One run annotation per company (the session can't read raw logs or reach sec.gov). Workflow mode officersprobe, from = CIKs."""
+    import datetime as dt
+    from maturities import maturities
+    for cik in [c.strip() for c in ciks.replace(";", ",").split(",") if c.strip()]:
+        try:
+            o = officers(cik)
+            j = sec_get(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json", as_json=True) or {}
+            r = (j.get("filings") or {}).get("recent") or {}
+            rows = list(zip(r.get("form", []), r.get("accessionNumber", []), r.get("filingDate", []), r.get("items", []) or [""] * len(r.get("form", []))))
+            docs = dict(zip(r.get("accessionNumber", []), r.get("primaryDocument", []) or []))
+            lines = [f"{o.get('company_name')} | site {o.get('website')} | phone {o.get('phone')}"]
+            lines += [f"SIGNED {p['form']} {p['filed']}: {p['name']} ({p['title']})" for p in o["people"]]
+            f = next(((f, a, d) for f, a, d, _ in rows if f in ("10-Q", "10-K")), None)
+            if f:
+                url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{f[1].replace('-', '')}/{docs.get(f[1])}"
+                lines.append(f"LATEST {f[0]} filed {f[2]} {url}")
+                lines += [f"MATURITY {m['date']} [{m['kind']}] {m['quote']}" for m in maturities(text_of(sec_get(url)), dt.date.today())]
+            for c in officer_changes(rows, cik, days=365)[:6]:
+                t = text_of(sec_get(f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{c['acc'].replace('-', '')}/{docs.get(c['acc'])}"))
+                i = t.find("5.02")
+                lines.append(f"8-K 5.02 {c['date']} roles={change_roles(t)}: {t[i:i + 700] if i >= 0 else t[:700]}")
+            if o["people"]:
+                post({"kind": "officers", "items": [o]})  # HQ's contact block gets the names too
+            msg = "\n".join(lines)
+        except Exception as e:  # noqa: BLE001
+            msg = f"failed: {e}"
+        print(f"::notice title=probe {cik}::" + msg.replace("%", "%25").replace("\r", "").replace("\n", "%0A"), flush=True)
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 2 and sys.argv[1] == "--probe":
+        probe(sys.argv[2])
+    else:
+        main()
