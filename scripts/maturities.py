@@ -11,7 +11,8 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
 DATE = re.compile(r"\b(" + "|".join(MONTHS) + r")\s+(?:(\d{1,2}),\s*)?(20\d\d)\b")
 CUE = re.compile(r"\b(due|matur\w*|expir\w*|terminat\w*|repayable|extended)\b", re.I)
 DEBT = re.compile(r"\b(loans?|notes?|debentures?|credit agreement|revolv\w*|line of credit|facilit(?:y|ies)|borrowings?|indebtedness|bonds?)\b", re.I)
-NOT_DEBT = re.compile(r"\b(leases?|warrants?|options?|awards?|vest\w*|settlement|lawsuit|contract with|receivables?)\b", re.I)  # receivable = money owed TO them
+NOT_DEBT = re.compile(r"\b(leases?|warrants?|options?|awards?|vest\w*|settlement|lawsuit|contract with)\b", re.I)
+LENT_OUT = re.compile(r"\b(notes?|loans?) receivable\b|\breceivable from\b", re.I)  # money owed TO them, anywhere in the sentence
 
 
 def maturities(text, today, years=5, limit=8):
@@ -27,7 +28,7 @@ def maturities(text, today, years=5, limit=8):
             continue
         before = text[max(0, m.start() - 160):m.start()]
         near = before[-90:]
-        if not CUE.search(near) or NOT_DEBT.search(near) or not DEBT.search(before + text[m.end():m.end() + 40]):
+        if not CUE.search(near) or NOT_DEBT.search(near) or LENT_OUT.search(before) or not DEBT.search(before + text[m.end():m.end() + 40]):
             continue
         a, b = max(0, m.start() - 160), min(len(text), m.end() + 60)
         a = text.find(" ", a) + 1 if a else 0
@@ -52,6 +53,8 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     sstk = "The maturity of the Revolver is in 2029."
     assert maturities(sstk, today) == []
     assert maturities("The Credit Agreement matures in October 2027 under the revolving facility.", today)[0]["month_only"] is True
-    bwmn = "the Company's notes receivable included $0.5 million from BLD, with a maturity date of December 31, 2027."
+    bwmn = "On September 30, 2026 and December 31, 2025, our notes receivable included $ 0.4 million and $ 0.4 million, respectively from LDG, with a maturity date of December 31, 2027."
     assert maturities(bwmn, today) == []  # Bowman lent this out: not its debt
+    abl = "The ABL Revolver, secured by eligible accounts receivable and inventory, matures on October 28, 2027."
+    assert [x["date"] for x in maturities(abl, today)] == ["2027-10-28"]  # an ABL backed by receivables is still their debt
     print("maturities: ok")
