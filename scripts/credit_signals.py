@@ -22,6 +22,9 @@ import httpx
 from edgar import search_filings, set_identity
 from edgar.httprequests import download_json
 
+from maturities import maturities
+from officers import sec_get, text_of
+
 FN = os.environ.get("FUND_SIGNALS_URL", "https://nfcysxqdwpdhrdpgxrlo.supabase.co/functions/v1/fund-signals")
 KEY = os.environ.get("FUND_INGEST_KEY", "")
 FRAMES = "https://data.sec.gov/api/xbrl/frames/{tax}/{tag}/USD/{period}.json"
@@ -175,13 +178,14 @@ def profile(cik):
     j = download_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
     addr = (j.get("addresses") or {}).get("business") or {}
     recent = (j.get("filings") or {}).get("recent") or {}
-    url = None
-    for form, acc, doc in zip(recent.get("form", []), recent.get("accessionNumber", []), recent.get("primaryDocument", [])):
+    url = kind = filed = None
+    for form, acc, doc, fd in zip(recent.get("form", []), recent.get("accessionNumber", []), recent.get("primaryDocument", []), recent.get("filingDate", [])):
         if form in ("10-K", "10-Q"):
-            url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}"
+            url, kind, filed = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}", form, fd
             break
     return {"name": j.get("name"), "sic": j.get("sic"), "sicDesc": j.get("sicDescription"), "tickers": j.get("tickers") or [],
-            "exchanges": [e for e in (j.get("exchanges") or []) if e], "state": addr.get("stateOrCountry"), "filingUrl": url}
+            "exchanges": [e for e in (j.get("exchanges") or []) if e], "state": addr.get("stateOrCountry"), "filingUrl": url,
+            "filingForm": kind, "filingDate": filed}
 
 
 def annual_revenue(cik):
@@ -283,6 +287,14 @@ def credit():
             flags["forbearance"] = forb[c]
         if c in gc:
             flags["going_concern"] = gc[c]
+        # Real maturity dates + the filing's own words (6 Nov 2026): "due within 12 months" alone flagged revolvers and
+        # convertibles maturing in 2029-30. Stored inside flags so no server change is needed.
+        if p.get("filingUrl"):
+            try:
+                items = maturities(text_of(sec_get(p["filingUrl"])), today)
+                flags["maturities"] = {"form": p.get("filingForm"), "filed": p.get("filingDate"), "url": p["filingUrl"], "items": items}
+            except Exception as e:  # noqa: BLE001
+                log(f"  maturities {c}: {e}")
         batch.append({"cik": c, **p, "periodEnd": (dcur.get(c) or cash.get(c) or (None, None))[1], "debtCurrent": val(dcur, c),
                       "debtNoncurrent": val(dnon, c), "revolverCurrent": val(rvl, c), "cash": val(cash, c), "revenue": val(rev, c), "publicFloat": val(flt, c), "flags": flags,
                       "ebitda": ebitda(c), "interestExpense": val(intx, c), "debtTypes": debt_types(c)})

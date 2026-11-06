@@ -1,7 +1,7 @@
 // Pipeline → Credit signals: small US public companies that need private credit (Peter's lane).
 // Filled daily by the GitHub edgartools job (scripts/credit_signals.py) from SEC data; judged on the server
 // (classifyCredit in supabase/functions/fund-signals/rules.js). Every verdict shows its reasons.
-import { sb, state, esc, $, $$, toast, fail, modal, opts, firstName } from './core.js';
+import { sb, state, esc, $, $$, toast, fail, modal, opts, firstName, fmtDate } from './core.js';
 import { messageFor } from './outreach.js';
 import { whyBlock } from './kinds.js';
 import { loadContacts, contactHtml, bindContacts, bestPerson, contactsSetup, cfoChanged } from './contacts.js';
@@ -61,6 +61,18 @@ function draw() {
   bind(shown);
 }
 
+// Real maturity dates read from the filing's own words (scripts/maturities.py, 6 Nov 2026). "Due in 12 months" on the
+// balance sheet also counts revolvers / convertibles that mature in 2029-30, so the email hook comes from this, never from it.
+function maturityHtml(m) {
+  if (!m) return '';
+  const it = m.items || [], soon = it.filter(x => (Date.parse(x.date) - Date.now()) / 864e5 <= 730);
+  const when = x => new Date(x.date + 'T12:00:00Z').toLocaleDateString('en-GB', x.month_only ? { month: 'long', year: 'numeric' } : { day: 'numeric', month: 'long', year: 'numeric' });
+  const src = `${esc(m.form || 'filing')}${m.filed ? ` filed ${fmtDate(m.filed)}` : ''}`;
+  if (!soon.length) return `<p class="fsMat none">✕ <b>No debt maturity in the next 2 years</b> in the latest ${src}${it.length ? `: first is ${esc(when(it[0]))}` : ''}. The "due in 12 months" is likely a revolver or convertible booking. Not a refinancing hook.</p>`;
+  return `<div class="fsMat"><b>▲ Matures ${esc(when(soon[0]))}</b> <span class="muted s">· from the <a href="${esc(m.url)}" target="_blank" rel="noopener">${src} ↗</a>, check the quote before using it</span>
+    <ul>${soon.slice(0, 3).map(x => `<li><b>${esc(when(x))}</b>: “…${esc(x.quote)}…”</li>`).join('')}</ul></div>`;
+}
+
 function rowHtml(s) {
   const f = s.flags || {}, total = (s.debt_current || 0) + (s.debt_noncurrent || 0);
   const facts = [
@@ -89,6 +101,7 @@ function rowHtml(s) {
       <h4>${esc(s.company_name)}${s.tickers ? ` <span class="fsVeh">${esc(s.tickers)}${s.exchange ? ' · ' + esc(s.exchange) : ''}</span>` : ''}</h4>
       ${markLine(s)}
       <div class="fsFacts">${facts.map(x => `<span>${x}</span>`).join('')}</div>
+      ${maturityHtml(f.maturities)}
       ${market ? `<p class="pHint">${market}</p>` : ''}
       ${contactHtml('credit', String(Number(s.cik)), s)}
       ${whyBlock(s.reasons, esc)}

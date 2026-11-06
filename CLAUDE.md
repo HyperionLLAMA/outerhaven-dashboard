@@ -250,6 +250,14 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   `credit_done`, which sets `on_latest=false` (cut) on rows that run didn't send; tickers ending in Q (Chapter 11) are cut. Migration:
   `supabase/2026-10-02-credit-signals.sql`.
 
+- **Real maturity dates (6 Nov 2026, Tengku; `scripts/maturities.py`, self-check `python3 -I scripts/maturities.py`):** the balance sheet's
+  "due within 12 months" also counts revolvers / convertibles that mature in 2029-30 (Bowman, Shutterstock, A10 were false alarms
+  when checked by hand). Most filers don't tag maturity dates in XBRL (DLH doesn't), so the credit scan reads the latest 10-Q / 10-K
+  text: a month-date near a cue (due / matur / expir / extended) and a debt word, not leases / warrants / receivables, between today
+  and +5 years; one quote per date. Stored in `credit_signals.flags.maturities` {form, filed, url, items[{date, month_only, quote}]}
+  (inside flags, so no server change). HQ card: ▲ "Matures <date>" + the quotes, or ✕ "No debt maturity in the next 2 years" (not a
+  refinancing hook). Email hooks come from these quotes, checked against the filing before any send (Tengku's rule).
+
 ## BDC loans (Pipeline → BDC loans tab, `hq/bdc.js`, admin only; 8 Oct 2026)
 - The main private-company credit lane (UCC is now secondary). Private companies that borrow from BDCs, from the SEC's **BDC data sets**
   (every BDC's schedule of investments, XBRL, `https://www.sec.gov/files/datastandardsinnovation/data/business-development-company-bdc-data-sets/`

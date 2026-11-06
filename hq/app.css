@@ -1469,3 +1469,7 @@ body,.card,.kpi,.checklist,.side{transition:background-color .2s,border-color .2
 .pCard.dragging{opacity:.45}
 .pCol.dropOk{outline:2px dashed var(--brass);outline-offset:4px;border-radius:8px}
 .pUndo{color:var(--ink)}
+/* Real maturity dates on credit cards (6 Nov 2026) */
+.fsMat{margin:8px 0;padding:8px 10px;border-left:3px solid var(--good);background:var(--sunk);border-radius:6px;font-size:var(--fs-s)}
+.fsMat ul{margin:6px 0 0;padding-left:18px}.fsMat li{margin:3px 0;color:var(--ink-2)}
+.fsMat.none{border-left-color:var(--warn);color:var(--ink-2)}
