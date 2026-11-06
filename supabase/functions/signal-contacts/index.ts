@@ -234,6 +234,12 @@ async function ingest(body: any) {
     }
     return { stored: n };
   }
+  // Same email check as the card's "Find email", for Claude's pre-send checks from SQL (7 Nov 2026; no admin login there).
+  if (body.kind === "email") {
+    const t = String(body.type || "credit"), k = String(body.key || ""), d = String(body.domain || "").trim().toLowerCase();
+    if (d) await save(t, k, { domain: d, website: `https://${d}` });   // a checked domain replaces a wrong one (Paradium had a merch shop)
+    return await email(String(body.type || "credit"), String(body.key || ""), String(body.name || "").trim(), String(body.role || ""));
+  }
   throw new Error("Unknown ingest kind");
 }
 
