@@ -73,7 +73,7 @@ def maturities(text, today, years=5, limit=8):
         if JUNK.search(sent):
             continue
         amt = amount_m(sent)
-        if amt is None and a > 0:  # "The loan is due on ..." names its size in the sentence before (McEwen $2.1M, Jushi $1.4M)
+        if amt is None and a > 0 and re.match(r"(The|This|These|Such) (loan|notes?|promissory notes?)\b", sent):  # "The loan is due on ..." names its size in the sentence before (McEwen $2.1M, Jushi $1.4M)
             pa, _ = sentence(text, max(0, a - 2), max(0, a - 2))
             amt = amount_m(text[pa:a])
         kind = "term" if TERM.search(sent) else "revolver" if REVOLVER.search(sent) else "debt"
@@ -131,4 +131,6 @@ if __name__ == "__main__":  # self-check on real sentences from filings checked 
     assert maturities(esoa, today)[0]["kind"] == "revolver"
     rgs = "rgs-20260930 0000716643 FALSE 09/30 2027 Q1 P1Y xbrli:shares iso4217:USD loan matures January 29, 2028 us-gaap:CommonStockMember"
     assert maturities(rgs, today) == []
+    klxe2 = "We issued warrants for $ 1.0 million. Our 2028 ABL Facility matures on March 7, 2028 and we intend to refinance it."
+    assert maturities(klxe2, today)[0]["small"] is False  # only "The loan / The notes ..." borrow the size from before
     print("maturities: ok")
