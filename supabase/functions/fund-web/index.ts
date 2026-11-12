@@ -162,7 +162,8 @@ async function checkSponsor(row: any, key: string) {
   const hits = (await serper(key, sponsorQuery(owner, row.company_name))).filter((h: any) => h.link && has(`${h.title} ${h.snippet}`, ok) && !EXCLUDE.includes(hostOf(h.link)));
   // Page text AND Google's snippet: firm sites often render the quote with JavaScript, the snippet usually carries it.
   const pages = await Promise.all(hits.slice(0, 6).map(async (h: any, i: number) => ({ url: h.link, title: h.title, text: `${h.title}. ${h.snippet || ""}\n${(i < 4 ? await page(h.link) : null) || ""}` })));
-  const best = sponsorsFromPages(row.company_name, owner, pages)[0] || null;
+  // Only someone quoted on THIS deal: a partner from another release (promotions, other deals) is not the deal lead.
+  const best = sponsorsFromPages(row.company_name, owner, pages).find(x => x.on_deal) || null;
   let cost = SERPER_PRICE, person: any = null;
   if (best) {
     const li = (await serper(key, `"${best.name}" ${owner} site:linkedin.com/in`)).find((h: any) => /linkedin\.com\/in\//.test(h.link || "") && norm(h.title).startsWith(norm(best.name).split(" ")[0]) && norm(h.title).includes(norm(best.name).split(" ").pop()!));
