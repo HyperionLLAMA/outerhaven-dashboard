@@ -46,3 +46,10 @@ assert cp("On July 30, 2026, Ryan Zeek notified the Company of his resignation a
 assert cp("Dale Strang, the Company's Chief Executive Officer, will also serve as interim principal financial officer.") == ["appointed:Dale Strang:cfo:interim"]
 assert cp("The Compensation Committee approved the 2026 annual bonus plan for the Chief Executive Officer and Chief Financial Officer.") == []
 print("change_people ok")
+assert cp("Pursuant to the Stockholders Agreement, the Chief Executive Officer resigned from the Board.") == []
+print("doc words ok")
+import json  # noqa: E402
+for t, want in json.load(open(os.path.join(os.path.dirname(__file__), "officer_cases.json"))):
+    got = sorted(f"{x['event']}:{x['name']}:{x['role']}{':interim' if x['interim'] else ''}" for x in change_people(t))
+    assert got == sorted(want), (got, want, t[:80])
+print("8-K cases ok")

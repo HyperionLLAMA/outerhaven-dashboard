@@ -80,3 +80,10 @@ console.log('false sales ok');
   assert.equal(sponsorsFromPages('Prisma Graphic, LLC', 'CenterGate Capital', [{ url: 'https://www.centergatecapital.com/post/centergate-capital-partners-with-prisma', title: 'CenterGate Capital partners with Prisma', text: 'said Jeff Kovick, Managing Director at CenterGate Capital.' }])[0].on_deal, true);
   console.log('sponsor forms ok');
 }
+{
+  // Real 8-K Item 5.02 sentences, shared with scripts/tests/test_officers.py
+  const { officersIn } = await import('../../supabase/functions/fund-web/company.js');
+  const fs = await import('node:fs'), cases = JSON.parse(fs.readFileSync(new URL('./officer_cases.json', import.meta.url)));
+  for (const [t, want] of cases) assert.deepEqual(officersIn(t).map(x => `${x.event}:${x.name}:${x.role}${x.interim ? ':interim' : ''}`).sort(), [...want].sort(), t.slice(0, 60));
+  console.log('8-K cases ok');
+}

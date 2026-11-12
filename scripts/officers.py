@@ -184,39 +184,63 @@ def change_roles(text):
     return out
 
 
-# Same patterns as officersIn() in supabase/functions/fund-web/company.js (news). Names need first + last.
-_NAME = r"(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})"
-_ROLE = r"(Chief Financial Officer|CFO|principal financial officer|Chief Executive Officer|CEO|principal executive officer)"
-_ART = r"(?:the Company's |the company's |its |our |the |their )?(?:new |permanent )?"
+# Same patterns as officersIn() in supabase/functions/fund-web/company.js (news); shared cases in scripts/tests/officer_cases.json
+# (real 8-K Item 5.02 sentences: Atara, Powerfleet, Harmony, Digimarc, Katapult). Names need first + last.
+_NAME = r"(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})(?:,\s*(?:M\.D\.|Ph\.D\.|Jr\.|Sr\.|CPA|CFA)(?=[,\s]))?"
+_ROLE = r"([Cc]hief [Ff]inancial [Oo]fficer|CFO|[Pp]rincipal [Ff]inancial [Oo]fficer|[Cc]hief [Ee]xecutive [Oo]fficer|CEO|[Pp]rincipal [Ee]xecutive [Oo]fficer)"
+_ART = r"(?:the Company[’']s |the company[’']s |its |our |the |their )?(?:new |permanent )?(?:(?:[A-Z][\w-]* ){1,4}and )?"
+_INT = r"((?:[Ii]nterim|[Aa]cting) )?"
+_GAP = r"(?:(?!\. [A-Z])[^;]){0,130}?"
+_LEFT = r"(?:resigned|resigns|has resigned|will resign|departed|departs|will depart|stepped down|steps down|will step down|is stepping down|will be stepping down|retired|retires|will retire|is retiring|will be retiring|is leaving|will leave|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))"
 _RX = {
-    "appoint": re.compile(rf"\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+{_NAME},?\s+(?:[^.]{{0,60}}?\s)?(?:as|to)\s+(?:the (?:role|position) of )?{_ART}(interim |acting )?{_ROLE}"),
-    "passive": re.compile(rf"{_NAME}(?:,[^,.]{{0,80}},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:as\s+|to\s+)?{_ART}(interim |acting )?{_ROLE}"),
-    "serve": re.compile(rf"{_NAME}(?:,[^.]{{0,80}}?,)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+{_ART}(interim |acting )?{_ROLE}"),
-    "left": re.compile(rf"{_NAME}(?:,[^.]{{0,80}}?,)?\s+(?:[^.]{{0,40}}?\s)?(?:resigned|resigns|has resigned|will resign|departed|departs|stepped down|steps down|will step down|retired|retires|will retire|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))[^.]{{0,60}}?{_ROLE}"),
-    "follow": re.compile(rf"(?:as|to)\s+{_ART}(?:interim |acting )?{_ROLE}[^.]{{0,40}}?\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?{_NAME}"),
+    "appoint": re.compile(rf"\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+{_NAME},?\s+(?:{_GAP}\s)?(?:to serve |to act )?(?:as|to)\s+(?:the (?:role|position) of )?{_ART}{_INT}{_ROLE}"),
+    "passive": re.compile(rf"{_NAME}(?:,{_GAP},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:to serve |to act )?(?:as\s+|to\s+)?{_ART}{_INT}{_ROLE}"),
+    "serve": re.compile(rf"{_NAME}(?:,{_GAP},)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+{_ART}{_INT}{_ROLE}"),
+    "left": re.compile(rf"{_NAME}(?:,{_GAP},)?\s+(?:[^.]{{0,40}}?\s)?{_LEFT}[^.]{{0,80}}?{_ROLE}"),
+    "follow": re.compile(rf"(?:as|to)\s+{_ART}(?:(?:[Ii]nterim|[Aa]cting) )?{_ROLE}{_GAP}\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?{_NAME}"),
     "leftOf": re.compile(rf"(?:resignation|departure|retirement|termination) of {_NAME},?\s+(?:as\s+)?{_ART}{_ROLE}"),
 }
-_NOT_NAME = re.compile(r"\b(The|Board|Company|Officer|Chief|Directors?|Item|Inc|Corp|Committee|Financial|Executive|President|Holdings|Group|Capital|Partners|LLC|Our|Its|Following|Effective|On|In|As)\b")
+_NOT_NAME = re.compile(r"\b(Agreement|Agreements|Stockholders?|Shareholders?|Plan|Plans|Section|Sections|Securities|Exchange|Act|Report|Form|Exhibit|Employment|Separation|Release|Award|Awards|Bonus|Compensation|Equity|Incentive|Notes|Credit|Loan|Trust|Fund|Bank|Corporation|Company|Board|Committee|Directors?|Officer|Officers|Chief|Financial|Executive|President|Holdings|Group|Capital|Partners|Inc|Corp|LLC|Item|Interim|Acting|Annual|Meeting|Effective|Following|Pursuant|Under|Our|Its|The|On|In|As)\b")
+
+
+def _bad_name(n):
+    return bool(_NOT_NAME.search(n)) or len(n.split()) < 2
+
+
+def _scan(rx, t, ni):
+    """Like finditer, but a match whose 'name' isn't a person retries one character later instead of swallowing the real name."""
+    pos = 0
+    while True:
+        m = rx.search(t, pos)
+        if not m:
+            return
+        if _bad_name(m.group(ni)):
+            pos = m.start() + 1
+            continue
+        yield m
+        pos = m.end()
 
 
 def change_people(text):
     """CEO / CFO appointments (incl. interim) and departures named in 8-K Item 5.02 text: [{name, role, event, interim}]."""
     t, out, seen = re.sub(r"\s+", " ", text or ""), [], set()
-    role_key = lambda r: "cfo" if re.search(r"financial|cfo", r, re.I) else "ceo"  # noqa: E731
+
+    def role_key(r):
+        return "cfo" if re.search(r"financial|cfo", r, re.I) else "ceo"
 
     def add(name, role, event, interim):
         name = name.strip()
-        if _NOT_NAME.search(name) or len(name.split()) < 2 or (event, name.lower(), role) in seen:
+        if (event, name.lower(), role) in seen:
             return
         seen.add((event, name.lower(), role))
         out.append({"name": name, "role": role, "event": event, "interim": bool(interim)})
     for k in ("appoint", "passive", "serve"):
-        for m in _RX[k].finditer(t):
+        for m in _scan(_RX[k], t, 1):
             add(m.group(1), role_key(m.group(3)), "appointed", m.group(2))
     for k in ("left", "leftOf"):
-        for m in _RX[k].finditer(t):
+        for m in _scan(_RX[k], t, 1):
             add(m.group(1), role_key(m.group(2)), "left", False)
-    for m in _RX["follow"].finditer(t):
+    for m in _scan(_RX["follow"], t, 2):
         add(m.group(2), role_key(m.group(1)), "left", False)
     return out
 

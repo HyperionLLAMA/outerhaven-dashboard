@@ -67,36 +67,46 @@ export { htmlText };
 
 // ---- Who holds the job now (13 Nov 2026, Tengku: the 10-Q signer is often gone; the CEO often covers as interim CFO). Same
 // patterns as change_people() in scripts/officers.py (8-K Item 5.02 text); here they read news sentences. Names need first + last.
-const NAME = String.raw`(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})`;
-const ROLE = String.raw`(Chief Financial Officer|CFO|principal financial officer|Chief Executive Officer|CEO|principal executive officer)`;
-const ART = String.raw`(?:the Company's |the company's |its |our |the |their )?(?:new |permanent )?`;
+const NAME = String.raw`(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})(?:,\s*(?:M\.D\.|Ph\.D\.|Jr\.|Sr\.|CPA|CFA)(?=[,\s]))?`;
+const ROLE = String.raw`([Cc]hief [Ff]inancial [Oo]fficer|CFO|[Pp]rincipal [Ff]inancial [Oo]fficer|[Cc]hief [Ee]xecutive [Oo]fficer|CEO|[Pp]rincipal [Ee]xecutive [Oo]fficer)`;
+// "the Company’s President and Chief Executive Officer": possessive (straight or curly) + another title joined by "and".
+const ART = String.raw`(?:the Company[’']s |the company[’']s |its |our |the |their )?(?:new |permanent )?(?:(?:[A-Z][\w-]* ){1,4}and )?`;
+const INT = String.raw`((?:[Ii]nterim|[Aa]cting) )?`;
+const GAP = String.raw`(?:(?!\. [A-Z])[^;]){0,130}?`;   // no sentence break ("Inc. (“CRCFO”)" is fine)
+const LEFT = String.raw`(?:resigned|resigns|has resigned|will resign|departed|departs|will depart|stepped down|steps down|will step down|is stepping down|will be stepping down|retired|retires|will retire|is retiring|will be retiring|is leaving|will leave|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))`;
 const RX = {
-  appoint: new RegExp(String.raw`\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+${NAME},?\s+(?:[^.]{0,60}?\s)?(?:as|to)\s+(?:the (?:role|position) of )?${ART}(interim |acting )?${ROLE}`, 'g'),
-  passive: new RegExp(String.raw`${NAME}(?:,[^,.]{0,80},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:as\s+|to\s+)?${ART}(interim |acting )?${ROLE}`, 'g'),
-  serve: new RegExp(String.raw`${NAME}(?:,[^.]{0,80}?,)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+${ART}(interim |acting )?${ROLE}`, 'g'),
-  left: new RegExp(String.raw`${NAME}(?:,[^.]{0,80}?,)?\s+(?:[^.]{0,40}?\s)?(?:resigned|resigns|has resigned|will resign|departed|departs|stepped down|steps down|will step down|retired|retires|will retire|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))[^.]{0,60}?${ROLE}`, 'g'),
-  // "appointed X as interim CFO following the resignation of Y": Y held the role X takes.
-  follow: new RegExp(String.raw`(?:as|to)\s+${ART}(?:interim |acting )?${ROLE}[^.]{0,40}?\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?${NAME}`, 'g'),
+  appoint: new RegExp(String.raw`\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+${NAME},?\s+(?:${GAP}\s)?(?:to serve |to act )?(?:as|to)\s+(?:the (?:role|position) of )?${ART}${INT}${ROLE}`, 'g'),
+  passive: new RegExp(String.raw`${NAME}(?:,${GAP},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:to serve |to act )?(?:as\s+|to\s+)?${ART}${INT}${ROLE}`, 'g'),
+  serve: new RegExp(String.raw`${NAME}(?:,${GAP},)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+${ART}${INT}${ROLE}`, 'g'),
+  left: new RegExp(String.raw`${NAME}(?:,${GAP},)?\s+(?:[^.]{0,40}?\s)?${LEFT}[^.]{0,80}?${ROLE}`, 'g'),
+  // "appointed X as interim CFO, succeeding / following the resignation of Y": Y held the role X takes.
+  follow: new RegExp(String.raw`(?:as|to)\s+${ART}(?:(?:[Ii]nterim|[Aa]cting) )?${ROLE}${GAP}\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?${NAME}`, 'g'),
   leftOf: new RegExp(String.raw`(?:resignation|departure|retirement|termination) of ${NAME},?\s+(?:as\s+)?${ART}${ROLE}`, 'g'),
 };
-const NOT_NAME = /\b(The|Board|Company|Officer|Chief|Directors?|Item|Inc|Corp|Committee|Financial|Executive|President|Holdings|Group|Capital|Partners|LLC|Our|Its|Following|Effective|On|In|As)\b/;
+const NOT_NAME = /\b(Agreement|Agreements|Stockholders?|Shareholders?|Plan|Plans|Section|Sections|Securities|Exchange|Act|Report|Form|Exhibit|Employment|Separation|Release|Award|Awards|Bonus|Compensation|Equity|Incentive|Notes|Credit|Loan|Trust|Fund|Bank|Corporation|Company|Board|Committee|Directors?|Officer|Officers|Chief|Financial|Executive|President|Holdings|Group|Capital|Partners|Inc|Corp|LLC|Item|Interim|Acting|Annual|Meeting|Effective|Following|Pursuant|Under|Our|Its|The|On|In|As)\b/;
 const roleKey = r => /financial|cfo/i.test(r) ? 'cfo' : 'ceo';
+const badName = n => NOT_NAME.test(n) || n.trim().split(/\s+/).length < 2;
+// Like matchAll, but a match whose "name" is not a person ("Harmony Biosciences Holdings") retries one character later
+// instead of swallowing the real name behind it.
+function* scan(re, t, ni) {
+  re.lastIndex = 0; let m;
+  while ((m = re.exec(t))) { if (badName(m[ni])) { re.lastIndex = m.index + 1; continue; } yield m; }
+}
 export function officersIn(text) {
   const t = String(text || '').replace(/\s+/g, ' '), out = [], seen = new Set();
   let at = 0;
   const add = (name, role, event, interim, quote) => {
     name = name.trim();
-    if (NOT_NAME.test(name) || name.split(' ').length < 2) return;
     const k = `${event}|${name.toLowerCase()}|${role}`;
     // "of Globex" right after the role = the job is at another company (kept for officersFromPages to check).
     const of = (t.slice(at, at + 80).match(/^,?\s+(?:of|at)\s+([A-Z][\w&.'’-]*(?:\s+(?:[A-Z][\w&.'’-]*|&|and))*)/) || [])[1] || null;
     if (!seen.has(k)) { seen.add(k); out.push({ name, role, event, interim: !!interim, quote: quote.slice(0, 300), of }); }
   };
-  const each = (re, f) => { for (const m of t.matchAll(re)) { at = m.index + m[0].length; f(m); } };
-  for (const kind of ['appoint', 'passive', 'serve']) each(RX[kind], m => add(m[1], roleKey(m[3]), 'appointed', m[2], m[0]));
-  each(RX.left, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
-  each(RX.leftOf, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
-  each(RX.follow, m => add(m[2], roleKey(m[1]), 'left', false, m[0]));
+  const each = (re, ni, f) => { for (const m of scan(re, t, ni)) { at = m.index + m[0].length; f(m); } };
+  for (const kind of ['appoint', 'passive', 'serve']) each(RX[kind], 1, m => add(m[1], roleKey(m[3]), 'appointed', m[2], m[0]));
+  each(RX.left, 1, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
+  each(RX.leftOf, 1, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
+  each(RX.follow, 2, m => add(m[2], roleKey(m[1]), 'left', false, m[0]));
   return out;
 }
 export const officerQuery = name => `"${brand(name)}" ("chief financial officer" OR CFO OR "chief executive officer") appointed OR named OR interim OR resigned OR "steps down"`;
