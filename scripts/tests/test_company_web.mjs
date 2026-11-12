@@ -71,3 +71,12 @@ console.log('false sales ok');
   assert.equal(ps[0].name, 'Jane Doe'); assert.equal(ps[0].on_deal, true);
   console.log('sponsors ok');
 }
+{
+  const { sponsorsIn, sponsorsFromPages } = await import('../../supabase/functions/fund-web/company.js');
+  // PCS Software / LLR Partners (13 Nov 2026 live check): the three ways releases and deal sites write it
+  assert.equal(sponsorsIn('said Michael Pantilione, Partner at LLR Partners.', 'LLR Partners')[0].name, 'Michael Pantilione');
+  assert.equal(sponsorsIn('with our technology," Michael Pantilione, LLR Partners Partner.', 'LLR Partners')[0].name, 'Michael Pantilione');
+  assert.equal(sponsorsIn('said Kevin Johnson, Principal, Capstreet.', 'Capstreet')[0].name, 'Kevin Johnson');
+  assert.equal(sponsorsFromPages('Prisma Graphic, LLC', 'CenterGate Capital', [{ url: 'https://www.centergatecapital.com/post/centergate-capital-partners-with-prisma', title: 'CenterGate Capital partners with Prisma', text: 'said Jeff Kovick, Managing Director at CenterGate Capital.' }])[0].on_deal, true);
+  console.log('sponsor forms ok');
+}

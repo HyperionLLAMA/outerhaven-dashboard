@@ -160,11 +160,12 @@ async function checkCompany(kind: "credit" | "bdc", row: any, key: string) {
 async function checkSponsor(row: any, key: string) {
   const owner = String(row.owner || ""), ok = norm(owner.replace(/,?\s+(LLC|L\.?P\.?|Inc\.?)$/i, ""));
   const hits = (await serper(key, sponsorQuery(owner, row.company_name))).filter((h: any) => h.link && has(`${h.title} ${h.snippet}`, ok) && !EXCLUDE.includes(hostOf(h.link)));
-  const pages = await Promise.all(hits.slice(0, 6).map(async (h: any, i: number) => ({ url: h.link, title: h.title, text: (i < 3 ? await page(h.link) : null) || `${h.title}. ${h.snippet || ""}` })));
+  // Page text AND Google's snippet: firm sites often render the quote with JavaScript, the snippet usually carries it.
+  const pages = await Promise.all(hits.slice(0, 6).map(async (h: any, i: number) => ({ url: h.link, title: h.title, text: `${h.title}. ${h.snippet || ""}\n${(i < 4 ? await page(h.link) : null) || ""}` })));
   const best = sponsorsFromPages(row.company_name, owner, pages)[0] || null;
   let cost = SERPER_PRICE, person: any = null;
   if (best) {
-    const li = (await serper(key, `"${best.name}" "${owner}" site:linkedin.com/in`)).find((h: any) => /linkedin\.com\/in\//.test(h.link || "") && norm(h.title).startsWith(norm(best.name).split(" ")[0]) && norm(h.title).includes(norm(best.name).split(" ").pop()!));
+    const li = (await serper(key, `"${best.name}" ${owner} site:linkedin.com/in`)).find((h: any) => /linkedin\.com\/in\//.test(h.link || "") && norm(h.title).startsWith(norm(best.name).split(" ")[0]) && norm(h.title).includes(norm(best.name).split(" ").pop()!));
     cost += SERPER_PRICE;
     person = { name: best.name, role: "sponsor", title: best.title, employer: owner, linkedin: li ? String(li.link).split("?")[0] : null, source: "news", source_url: best.url, on_deal: best.on_deal, quote: best.quote };
   }

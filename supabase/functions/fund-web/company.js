@@ -116,13 +116,15 @@ export function officersFromPages(name, pages, now = new Date()) {
 // ---- PE owner's deal partner (13 Nov 2026): a PE-owned BDC borrower's refinancing is run by the owner, so the person to reach is
 // the partner on that deal. Investment press releases quote them: "said Jane Doe, Partner at Audax" / "Audax Principal John Roe".
 const TITLE = String.raw`((?:Senior |Managing |Operating |Founding |Executive )?(?:Partner|Principal|Managing Director|Director|Vice President|Co-Founder|Founder)(?: and [A-Z][\w ]{2,30}?)?)`;
-export const sponsorQuery = (owner, name) => `"${owner}" "${brand(name)}"`;
+export const sponsorQuery = (owner, name) => `"${owner}" "${brand(name)}" said partner`;
 export function sponsorsIn(text, owner) {
   const t = String(text || '').replace(/\s+/g, ' '), o = esc(String(owner || '').replace(/,?\s+(LLC|L\.?P\.?|Inc\.?)$/i, '').trim()), out = [];
   if (!o) return out;
   const rx = [
     [new RegExp(String.raw`${NAME},\s+(?:a |the |an )?${TITLE}\s+(?:at|of|with)\s+${o}`, 'g'), 1, 2],
     [new RegExp(String.raw`${o}(?:'s|’s)?\s+${TITLE}\s+${NAME}`, 'g'), 2, 1],
+    [new RegExp(String.raw`${NAME},\s+(?:a |the |an )?${TITLE},\s+${o}`, 'g'), 1, 2],          // "X, Partner, LLR Partners"
+    [new RegExp(String.raw`${NAME},\s+${o}(?:'s|’s)?\s+${TITLE}\b`, 'g'), 1, 2],               // "X, LLR Partners Partner" (deal sites)
   ];
   for (const [re, ni, ti] of rx) for (const m of t.matchAll(re)) {
     const name = m[ni].trim();
@@ -133,9 +135,10 @@ export function sponsorsIn(text, owner) {
 }
 // Pages about the owner + company -> partners; those in a sentence naming the company first.
 export function sponsorsFromPages(name, owner, pages) {
-  const key = norm(brand(name)), out = [];
+  // On the deal: the sentence or the page (title / URL) names the company; pages shorten names, so the first distinctive word counts.
+  const key = norm(brand(name)), first = key.split(' ').find(w => w.length >= 4) || key, out = [];
   for (const p of pages) for (const q of sentences(p.text)) for (const s of sponsorsIn(q, owner)) {
-    const i = out.findIndex(x => x.name === s.name), on = has(q, key) || has(p.title || '', key);
+    const i = out.findIndex(x => x.name === s.name), on = has(q, key) || has(p.title || '', key) || has(`${p.title || ''} ${String(p.url || '').replace(/[-_/.]/g, ' ')}`, first);
     if (i < 0) out.push({ ...s, on_deal: on, url: p.url }); else if (on) out[i].on_deal = true;
   }
   return out.sort((a, b) => Number(b.on_deal) - Number(a.on_deal));
