@@ -31,3 +31,7 @@ assert.deepEqual(ev('Acme Widgets, Inc.', 'Acme Widgets reported higher interest
 const w = readCompany('Acme Widgets, Inc.', [pg('Acme Widgets entered into a new $50 million term loan facility.', 'Jan 5, 2026'), pg('Acme Widgets completed the refinancing of its credit facility on better terms.', '2 weeks ago')], '2026-11-13', now);
 assert.equal(w.facts, 2); assert.equal(w.refi.date, '2026-10-30'); assert.equal(w.adviser, null);
 console.log('company web ok');
+// First live run (13 Nov 2026): "ADS Group Opco" became "ADS", which matched "roads" / "leads".
+assert.equal(brand('ADS Group Opco, LLC'), 'ADS Group');
+assert.deepEqual(scanCompany('Acme, Inc.', { url: 'https://x.com', text: 'Acmeco Partners entered into a new credit facility with its bank.' }), []);
+console.log('short names ok');

@@ -8,9 +8,12 @@ const SUFFIX = /\b(inc|incorporated|corp|corporation|co|company|holdings?|group|
 // "HYDROFARM HOLDINGS GROUP, INC." -> "Hydrofarm"; "TAUC Management, LLC" -> "TAUC Management". The brand Google and the press use.
 export function brand(name) {
   const s = String(name || '').replace(/\([^)]*\)/g, ' ').replace(/&amp;/g, '&').replace(/,/g, ' ').replace(SUFFIX, ' ').replace(/\s+/g, ' ').trim();
-  const t = s || String(name || '').trim();
+  // Too short alone ("ADS Group Opco" -> "ADS" matches every "ads"): keep Group / Holdings, drop only legal and deal-vehicle words.
+  const t = s.length >= 4 ? s : String(name || '').replace(/\([^)]*\)/g, ' ').replace(/,/g, ' ').replace(/\b(inc|corp|llc|l\.?l\.?c|ltd|lp|opco|holdco|midco|topco|buyer|parent)\b\.?/gi, ' ').replace(/\s+/g, ' ').trim();
   return t === t.toUpperCase() && t.length > 4 ? t.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : t;
 }
+// Whole words only: "ads" must not match "roads".
+export const has = (text, key) => ` ${norm(text)} `.includes(` ${key} `);
 export const norm = t => String(t || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
 
 // Both searches limited to the past year (Serper tbs qdr:y): older news is already in the filings we read.
@@ -45,7 +48,7 @@ export function scanCompany(name, page, now = new Date()) {
   if (key.length < 3) return out;
   const date = dateOf(page.date, now), host = (() => { try { return new URL(page.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
   for (const q of sentences(page.text)) {
-    if (!norm(q).includes(key)) continue;
+    if (!has(q, key)) continue;
     let ev = sale.test(q) ? 'sale' : (EV.find(([, re]) => re.test(q)) || [])[0];
     if (!ev) continue;
     out.push({ event: ev, quote: q.slice(0, 400), date, url: page.url, source: host });

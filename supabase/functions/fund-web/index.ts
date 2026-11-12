@@ -8,7 +8,7 @@
 //   day; targets re-checked after RECHECK_DAYS). Admin (user JWT): action 'check' {id} = Check web now.
 // Keys: SERPER_API_KEY and/or EXA_API_KEY (pasted in HQ → Fund signals → Setup, write-only). No key = nothing runs.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { companyQueries, readCompany, brand } from "./company.js";
+import { companyQueries, readCompany, brand, has, norm } from "./company.js";
 import { queriesFor, summaryQuery, readResults, SCHEMA, EXCLUDE, serperQueries, scanPage, htmlText, cleanName } from "./read.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -129,13 +129,13 @@ async function checkFund(s: any, keys: { serper: string; exa: string }, allowExa
 // One Credit or BDC company: Google the past year, read the pages naming it, store web, mark stale (rules_version 0) so its
 // own cron re-judges it (fund-signals cron for credit, signal-contacts retryStale for BDC).
 async function checkCompany(kind: "credit" | "bdc", row: any, key: string) {
-  const b = brand(row.company_name).toLowerCase(), qs = companyQueries(row.company_name);
+  const b = norm(brand(row.company_name)), qs = companyQueries(row.company_name);
   const hits = (await Promise.all(qs.map(q => serper(key, q, "qdr:y")))).flat();
   const seen = new Set<string>(), cands: any[] = [];
   for (const h of hits) {
     if (!h.link || seen.has(h.link) || EXCLUDE.includes(hostOf(h.link))) continue;
     seen.add(h.link);
-    if (`${h.title} ${h.snippet}`.toLowerCase().includes(b)) cands.push(h);
+    if (has(`${h.title} ${h.snippet}`, b)) cands.push(h);
   }
   const pages = await Promise.all(cands.slice(0, PAGES).map(async h => ({ url: h.link, date: h.date, text: (await page(h.link)) || `${h.title}. ${h.snippet || ""}` })));
   // Snippets of the pages we didn't fetch still count (Google's own text, same-sentence rule applies).
@@ -153,10 +153,11 @@ async function companies(key: string, budgetLeft: number) {
   const n = Math.min(CO_PER_RUN, CO_DAILY_CAP - done, Math.floor(budgetLeft / EST_CO));
   if (n <= 0) return { skipped: done >= CO_DAILY_CAP ? "daily cap" : "budget" };
   const old = new Date(Date.now() - CO_RECHECK_DAYS * DAY).toISOString(), due = `web_checked_at.is.null,web_checked_at.lt.${old}`;
-  // BDC refinancing targets first (the main lane), then credit targets; best score first.
+  // BDC refinancing targets and credit targets, best score first.
   const bdc = ((await sb.from("bdc_signals").select("*").eq("verdict", "target").eq("lane", "refi").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["bdc", r]);
   const cr = ((await sb.from("credit_signals").select("*").eq("verdict", "target").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["credit", r]);
-  const picked = [...bdc, ...cr].slice(0, n) as [("credit" | "bdc"), any][];
+  // Alternate BDC and credit so neither list waits for the other to finish.
+  const picked = (Array.from({ length: n }, (_, i) => [bdc[i], cr[i]]).flat().filter(Boolean) as [("credit" | "bdc"), any][]).slice(0, n);
   return { checked: await Promise.all(picked.map(async ([k, r]) => {
     try { const w = await checkCompany(k, r, key); return { kind: k, company: r.company_name, refi: !!w.refi, adviser: !!w.adviser, sale: !!w.sale }; }
     catch (e) { return { kind: k, company: r.company_name, error: String(e instanceof Error ? e.message : e).slice(0, 160) }; }
