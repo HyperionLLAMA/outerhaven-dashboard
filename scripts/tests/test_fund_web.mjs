@@ -1,6 +1,6 @@
 // Offline tests for supabase/functions/fund-web/read.js: node scripts/tests/test_fund_web.mjs
 import assert from 'node:assert/strict';
-import { readResults, fundNo, amountNear, cleanName, queriesFor } from '../../supabase/functions/fund-web/read.js';
+import { readResults, fundNo, amountNear, cleanName, queriesFor, scanPage, htmlText, firmName, serperQueries } from '../../supabase/functions/fund-web/read.js';
 
 assert.equal(fundNo('Acme Ventures Fund II'), 2);
 assert.equal(fundNo('Acme Fund III-A, L.P.'), 3);
@@ -44,4 +44,21 @@ assert.equal(w.pages, 1); assert.equal(w.later.fund_no, 2); assert.equal(w.later
 // Bad summary JSON doesn't throw.
 w = readResults(s, [{ url: 'https://x.example.com', text: 'Acme', summary: '{not json' }]);
 assert.equal(w.facts, 0);
+
+// Serper path: plain-code sentence scan of a fetched page, then the same readResults trust rule.
+assert.equal(firmName({ company_name: 'Ground Game Venture Fund I, L.P.' }), 'Ground Game Venture');
+assert.deepEqual(serperQueries({ company_name: 'Acme Ventures Fund II, LP', fund_no: 2, executives: [{ name: 'Jo Smith' }] }),
+  ['"Acme Ventures" "Fund II" close', '"Acme Ventures" "Fund III"', '"Acme Ventures" "Jo Smith" fund assets under management']);
+const html = `<html><head><script>var x = "Acme Fund I final close $999 million";</script></head><body><h1>Acme news</h1>
+  <p>NEW YORK &ndash; Acme Ventures today announced the final close of Acme Ventures Fund I at $42 million, above its $35 million target.</p>
+  <p>Acme Ventures has also held a first close of Acme Ventures Fund II at $15 million.</p><p>The firm now manages $60 million in assets.</p>
+  <p>Zeta Partners closed Zeta Fund III at $500 million.</p></body></html>`;
+w = readResults(s, [scanPage(s, { url: 'https://pr.example.com/x', title: 'Acme news', text: htmlText(html), date: '2025-06-02' })]);
+assert.equal(w.final.amount, 42e6, 'final close from page text, script ignored');
+assert.equal(w.later.fund_no, 2); assert.equal(w.later.event, 'first_close'); assert.equal(w.later.amount, 15e6);
+assert.equal(w.aum.amount, 60e6);
+assert.equal(w.facts, 2, 'Zeta sentence ignored (no manager name)');
+// A Google snippet works the same way when the page can't be fetched.
+w = readResults(s, [scanPage(s, { url: 'https://paywalled.example.com/y', title: 'Acme closes', text: 'Jun 2, 2025 ... Acme Ventures closed Acme Ventures Fund I with $42 million in commitments ...' })]);
+assert.equal(w.final.amount, 42e6);
 console.log('fund web ok');

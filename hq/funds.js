@@ -158,7 +158,7 @@ function webBlock(s) {
     w.later && line(`Fund ${ROMAN[w.later.fund_no] || ''} ${EVT[w.later.event]?.toLowerCase() || w.later.event}`, w.later),
     w.aum && line('Firm AUM', w.aum),
   ].filter(Boolean);
-  return `<details class="fsPrep"><summary>Web check ${esc(w.at || '')}: ${items.length ? `${items.length} fact${items.length > 1 ? 's' : ''} found` : `nothing found in ${w.pages || 0} pages`}</summary>${items.length ? `<ul>${items.join('')}</ul>` : '<p class="s muted">No quoted close, newer fund or AUM on pages naming this manager. Not proof it hasn\'t closed: ask on the first call.</p>'}</details>`;
+  return `<details class="fsPrep"><summary>Web check ${esc(w.at || '')}${w.via ? ` (${esc(w.via.replace('serper', 'Google').replace('exa', 'Exa'))})` : ''}: ${items.length ? `${items.length} fact${items.length > 1 ? 's' : ''} found` : `nothing found in ${w.pages || 0} pages`}</summary>${items.length ? `<ul>${items.join('')}</ul>` : '<p class="s muted">No quoted close, newer fund or AUM on pages naming this manager. Not proof it hasn\'t closed: ask on the first call.</p>'}</details>`;
 }
 
 function rowHtml(s) {
@@ -195,7 +195,7 @@ function rowHtml(s) {
       ${s.status !== 'added' ? `<button class="btn sm ${s.verdict === 'target' ? 'primary' : ''}" data-add="${s.id}">Add to pipeline</button>` : '<span class="pFlag good">In pipeline</span>'}
       <button class="btn sm" data-copy="${s.id}">Copy opener</button>
       ${!['checking', 'queued'].includes(s.check_status) ? `<button class="btn sm" data-check="${s.id}">${s.check_status ? 'Re-check' : s.list === 'live' ? 'Check newer filings' : 'Check for next fund'}</button>` : ''}
-      <button class="btn sm" data-web="${s.id}" title="Search the web (Exa) for this fund's close, a newer fund and the firm's AUM">${s.web ? 'Re-check web' : 'Check web'}</button>
+      <button class="btn sm" data-web="${s.id}" title="Search the web (Google via Serper, Exa fallback) for this fund's close, a newer fund and the firm's AUM">${s.web ? 'Re-check web' : 'Check web'}</button>
       ${s.filing_url ? `<a class="btn sm ghost" href="${esc(s.filing_url)}" target="_blank" rel="noopener">Filing ↗</a>` : ''}
       ${s.status === 'dismissed' ? `<button class="btn sm ghost" data-undo="${s.id}">Restore</button>` : s.status !== 'added' ? `<button class="btn sm ghost" data-dismiss="${s.id}">Dismiss</button>` : ''}
     </div></article>`;
@@ -324,11 +324,11 @@ function settingsModal() {
         <li>Paste it here: <input type="password" id="fsGhTok" placeholder="github_pat_… or ghp_…" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsGhSave">Save</button> <button type="button" class="btn sm ghost" id="fsGhClear">Remove</button></li>
       </ol>
       <p id="fsGhStatus" class="s muted">Checking…</p>
-      <h4>Web checks (Exa)</h4>
-      <p>Form D can't say if a fund held its final close, for how much, if a newer fund is already out, or the firm's AUM. HQ asks the web: two Exa searches per fund (its name, then the people on its Form D), and keeps a fact only when the page names the manager and the quote is on the page word for word. Every 30 min the best unchecked targets are checked (about $0.03–0.05 a fund); targets are re-checked after 45 days. "Check web" on a card runs one now.</p>
+      <h4>Web checks (Serper, Exa fallback)</h4>
+      <p>Form D can't say if a fund held its final close, for how much, if a newer fund is already out, or the firm's AUM. HQ asks the web: three Google searches per fund through Serper (this fund's close, the next fund, the firm and a named partner), reads the pages that name the manager, and keeps a fact only when the sentence names the manager and is on the page word for word (about $0.003 a fund). For targets where Google finds nothing, Exa searches again (about $0.03 a fund) while the budget allows. Every 30 min the best unchecked funds are checked; they are re-checked after 45 days. "Check web" on a card runs one now.</p>
+      <ol><li>Serper key from <a href="https://serper.dev/api-key" target="_blank" rel="noopener">serper.dev ↗</a> (2,500 free searches, then $50 for 50,000): <input type="password" id="fsSerper" placeholder="Serper API key" autocomplete="off" style="width:min(100%,280px)"> <button type="button" class="btn sm primary" id="fsSerperSave">Save</button></li></ol>
       <p>Monthly budget: $<input type="number" id="fsExaBudget" min="0" step="1" style="width:80px"> <button type="button" class="btn sm" id="fsExaBudgetSave">Save</button> <span id="fsExaSpent" class="s muted"></span><br><span class="s muted">Spread evenly over the days left in the month; checks stop when it's used up.</span></p>
-      <ol><li>Get a key at <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai ↗</a>.</li>
-      <li>Paste it here: <input type="password" id="fsExa" placeholder="Exa API key" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsExaSave">Save</button></li></ol>
+      <ol start="2"><li>Optional Exa key from <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai ↗</a>: <input type="password" id="fsExa" placeholder="Exa API key" autocomplete="off" style="width:min(100%,280px)"> <button type="button" class="btn sm primary" id="fsExaSave">Save</button></li></ol>
       <p id="fsExaStatus" class="s muted">Checking…</p>
       <p class="s muted">The key only lets GitHub add filings and check results to this tab. If it leaks, tell Claude to rotate FUND_INGEST_SECRET and paste the new one.</p></div>`,
   });
@@ -342,7 +342,7 @@ function settingsModal() {
       : last ? `Token saved. Last run started from HQ: ${last.mode}, ${new Date(last.created_at).toLocaleString()}: ${ans(last)}.` : 'Token saved. The first run starts at the next :10.';
   };
   ghStatus();
-  const exaStatus = async () => { const { data } = await sb.rpc('contact_keys_set'); const e = $('#fsExaStatus', m); if (e) e.textContent = data?.exa ? 'Exa key saved: web checks run every 30 min.' : 'No Exa key yet: web checks are off.'; };
+  const exaStatus = async () => { const { data } = await sb.rpc('contact_keys_set'); const e = $('#fsExaStatus', m); if (e) e.textContent = data?.serper || data?.exa ? `Saved: ${[data.serper && 'Serper', data.exa && 'Exa'].filter(Boolean).join(' + ')}. Web checks run every 30 min.` : 'No Serper or Exa key yet: web checks are off.'; };
   exaStatus();
   (async () => {
     const month = new Date(); month.setUTCDate(1); month.setUTCHours(0, 0, 0, 0);
@@ -356,6 +356,13 @@ function settingsModal() {
     if (!(v >= 0)) { toast('Enter a dollar amount.'); return; }
     if (fail(await sb.from('growth_settings').update({ fund_web_budget: v }).eq('id', 1), 'Save budget')) return;
     toast(`Web-check budget set to $${v} a month.`);
+  };
+  $('#fsSerperSave', m).onclick = async () => {
+    const v = $('#fsSerper', m).value.trim(); $('#fsSerper', m).value = '';
+    if (v.length < 16) { toast('That doesn\'t look like a Serper key.'); return; }
+    const { error } = await sb.rpc('set_contact_key', { p_name: 'SERPER_API_KEY', p_value: v });
+    if (error) { toast('Could not save: ' + error.message); return; }
+    toast('Saved. Web checks start at the next :05 or :35.'); exaStatus();
   };
   $('#fsExaSave', m).onclick = async () => {
     const v = $('#fsExa', m).value.trim(); $('#fsExa', m).value = '';

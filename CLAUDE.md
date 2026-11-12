@@ -252,6 +252,14 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   counts as manager total when larger. Form D Item 15: sales commissions / finder's fees are a cut only on a raise still open (live, or
   next-fund list raising/stuck); on a closed fund they are +6 "a proven buyer of fundraising help". Untested against the live Exa API:
   the first cron run is the test (check `fund_web_runs` and a few `web` facts by hand). Migration `supabase/2026-11-13-fund-web-pay.sql`.
+- **Serper first (13 Nov 2026, Tengku: Exa ~$0.025 a fund, Serper ~$0.003):** with `SERPER_API_KEY` set, `fund-web` runs three Google
+  searches per fund via Serper (`serperQueries`: "<firm>" "Fund N" close / "<firm>" "Fund N+1" / "<firm>" "<first person>" AUM; firm =
+  `firmName()`), keeps results naming the manager (SEC mirrors excluded), fetches the top 4 pages (8 s timeout, `htmlText`), falls back
+  to the Google snippet when a page won't load, and `scanPage()` finds the sentences in code (manager keyword + fund number + close /
+  launch cue; AUM sentence) in the same shape Exa returns, so `readResults()` and its trust rule are unchanged. No LLM on this path. Exa
+  runs only when Serper found nothing, for `target` verdicts, with an Exa-sized amount of today's budget left (or with no Serper key).
+  `web.via` = serper | serper+exa | exa. Caps: 6 funds a run, 150 a day. Key via Setup (`set_contact_key` SERPER_API_KEY). Serper
+  price assumed $0.001 a search (`SERPER_PRICE`). Migration `supabase/2026-11-13-fund-web-serper.sql`. Tests in test_fund_web.mjs.
 - **Will they pay? (13 Nov 2026):** `people.pay_score` 0–5 (+ `pay_note`, `pay_at`) set in the Pipeline update window: demonstrated
   willingness from a conversation, never predicted (0 unknown, 1 no / free intros only, 2 resists upfront fees, 3 open to a paid scope,
   4 discussing budget / terms / pilot, 5 signed and paid). It's the "who paid, who didn't, why" log per signal source.

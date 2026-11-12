@@ -128,3 +128,32 @@ export function readResults(s, results, at = new Date().toISOString()) {
   const later = top > mine ? best(facts.filter(f => f.fund_no === top)) : null;
   return { at: at.slice(0, 10), pages, facts: facts.length, final, first, later, aum };
 }
+
+// ---- Serper (Google results) path, 13 Nov 2026: ~10x cheaper than Exa. Serper returns links + snippets only, so the edge
+// function fetches the pages and this code finds the sentences itself (no LLM at all). scanPage() turns a page into the same
+// shape Exa returns, so readResults() and its trust rule (quote on the page, page names the manager) apply unchanged.
+const R = n => Object.keys(ROMAN).find(k => ROMAN[k] === n) || String(n);
+// "Ground Game Venture Fund I, L.P." -> "Ground Game Venture": the firm, for quoted Google searches.
+export const firmName = s => cleanName(s.company_name).replace(/\s+(?:fund\s+)?(?:[IVX]{1,4}|\d{1,2})(?:-[A-Z0-9]+)?$/i, '').replace(/\s+fund$/i, '').trim() || s.check_keyword || '';
+// Three searches: this fund's close, the next fund, the firm + a named partner (AUM, renamed funds).
+export function serperQueries(s) {
+  const firm = firmName(s), n = s.fund_no || 1, who = (s.executives || [])[0]?.name || '';
+  return [`"${firm}" "Fund ${R(n)}" close`, `"${firm}" "Fund ${R(n + 1)}"`, `"${firm}"${who ? ` "${who}"` : ''} fund assets under management`];
+}
+export const htmlText = html => String(html || '').replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|li|h\d|td|tr)>/gi, '\n')
+  .replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&#8217;|&rsquo;|&lsquo;/g, "'").replace(/&quot;|&ldquo;|&rdquo;|&#8220;|&#8221;/g, '"')
+  .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, '-').replace(/&#36;/g, '$').replace(/[ \t\r\f\v]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+export const sentences = text => String(text || '').split(/\n+|(?<=[.!?])\s+(?=[A-Z"“$])/).map(x => x.replace(/\s+/g, ' ').trim()).filter(x => x.length >= 20 && x.length <= 600);
+// Event words, most specific first: an explicit "final close" beats a generic "closed".
+const CUES = [[/final close|final closing/i, 'final_close'], [/first close|initial close|first closing/i, 'first_close'], [/interim close|second close/i, 'interim_close'],
+  [/\bclosed\b[^.]{0,60}\bfund\b|\bfund\b[^.]{0,60}\b(?:closed|oversubscribed)\b|hard cap/i, 'final_close'], [/\blaunch(?:es|ed|ing)?\b|\b(?:is|now|began|begins) raising\b|\btargeting \$/i, 'launch']];
+export function scanPage(s, page) {
+  const kw = norm(s.check_keyword || cleanName(s.company_name)), all = sentences(page.text), events = [];
+  for (const q of all) {
+    if (!norm(q).includes(kw) || !fundNo(q)) continue;
+    const ev = CUES.find(([re]) => re.test(q));
+    if (ev) events.push({ fund_name: q, event: ev[1], quote: q });
+  }
+  const aumQ = all.filter(q => AUM.test(q) && amounts(q).length).sort((a, b) => norm(b).includes(kw) - norm(a).includes(kw))[0];
+  return { url: page.url, title: page.title || '', publishedDate: page.date || null, text: all.join('\n'), summary: JSON.stringify({ about_manager: true, events, aum_quote: aumQ || '' }) };
+}
