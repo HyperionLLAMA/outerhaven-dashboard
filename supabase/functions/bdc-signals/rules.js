@@ -16,7 +16,21 @@
 //   lane's maximum (refi 69, loan sale 78); verdicts are decided on the points, so rescaling changes no verdict and no order.
 // v6 (12 Oct 2026, TAUC Management = Total Access Urgent Care, owned by ICV Partners; search on "TAUC" found nothing): no owner found
 //   no longer scores (+5 "possibly founder-owned" removed, refi max 64); it's a Check line instead.
-export const BDC_RULES_VERSION = 6;
+export const BDC_RULES_VERSION = 7;
+// Company web check (fund-web company.js, 13 Nov 2026): news from the past year that makes a maturity pitch wrong. A fact dated
+// before our filing is already in the numbers (info); after it, or undated, it changes the call.
+export function webNews(web, since) {
+  const out = [];
+  if (!web) return out;
+  const when = f => f.date ? `news ${f.date}` : 'news, date unknown', src = f => ` (${f.source || 'web'}: "${String(f.quote).slice(0, 160)}")`;
+  const fresh = f => !f.date || !since || f.date > since;
+  if (web.sale) out.push(fresh(web.sale) ? { tone: 'maybe', pts: -20, text: `Being sold (${when(web.sale)}): the buyer decides how its debt is refinanced${src(web.sale)}` } : { tone: 'info', pts: 0, text: `Sale news from ${web.sale.date}, before the filing: check it's still live${src(web.sale)}` });
+  if (web.refi) out.push(fresh(web.refi) ? { tone: 'maybe', pts: web.refi.date ? -15 : -5, text: `May already be refinanced (${when(web.refi)}): read it before any message${src(web.refi)}` } : { tone: 'info', pts: 0, text: `Financing news from ${web.refi.date}, before the filing (already in its numbers)${src(web.refi)}` });
+  if (web.adviser && fresh(web.adviser)) out.push({ tone: 'maybe', pts: -10, text: `Already has a banker or adviser (${when(web.adviser)}): we'd be second in line${src(web.adviser)}` });
+  if (!web.sale && !web.refi && !web.adviser) out.push({ tone: 'info', pts: 0, text: `Web check ${web.at}: no refinancing, adviser or sale news in the past year` });
+  return out;
+}
+
 export const SIZE = { min: 10e6, core: 75e6, max: 150e6, sale: 20e6 };
 // Most points a row can get in each lane (sum of every positive rule below). Change these with any rule's points.
 export const MAX = { refi: 15 + 25 + 8 + 8 + 3 + 5, loan_sale: 20 + 25 + 8 + 10 + 10 + 5 };
@@ -80,6 +94,7 @@ export function classifyBdc(s, today = new Date()) {
     if (tiers.includes('venture')) { ok = false; reasons.push({ tone: 'maybe', text: `Venture debt (${names}): loans to VC-backed companies rarely trade; the VCs and the lender work it out.` }); }
     if (s.country) { ok = false; reasons.push({ tone: 'maybe', text: s.country === 'Outside the US' ? 'Non-US company (foreign legal form in the name): outside Peter\'s US loan buyers.' : `Based in ${s.country}: outside Peter's US loan buyers.` }); }
     if (s.owner) reasons.push({ tone: 'info', text: `Owned by ${s.owner}: the owner negotiates with the lenders.` });
+    for (const n of webNews(s.web, s.period && String(s.period).slice(0, 10))) reasons.push({ tone: 'info', text: n.text });
     return out(ok && score >= 35 ? 'target' : 'maybe', ok ? score : Math.min(score, 34), 'loan_sale');
   }
 
@@ -122,6 +137,7 @@ export function classifyBdc(s, today = new Date()) {
   else if (s.owner_checked_at) reasons.push({ tone: 'maybe', text: 'No owner found by search, which is not proof: most BDC borrowers are PE-backed and filings often use a legal name or acronym. Confirm before calling.' });
   else reasons.push({ tone: 'info', text: 'Owner not checked yet (Find contacts checks it).' });
 
+  for (const n of webNews(s.web, s.period && String(s.period).slice(0, 10))) { score += n.pts; if (n.tone === 'maybe') maybe = true; reasons.push({ tone: n.tone, text: n.text }); }
   if (!trigger) { reasons.push({ tone: 'maybe', text: 'No trigger: nothing forces a refinancing in the next 4–24 months.' }); return out('maybe', Math.min(score, 34), 'refi'); }
   return out(maybe || score < 35 ? 'maybe' : 'target', maybe ? Math.min(score, 34) : score, 'refi');
 }

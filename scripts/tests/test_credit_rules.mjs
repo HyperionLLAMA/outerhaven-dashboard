@@ -80,4 +80,12 @@ console.log('galaxy ok');
   // An 8-K filed BEFORE the 10-Q doesn't count (the 10-Q already reflects it).
   assert.equal(classifyCredit({ ...row, flags: { maturities: mats, new_debt_8k: { date: '2026-07-01' } } }).verdict, 'target');
   console.log('new debt 8-K ok');
+  // v13: company web check. News after the 10-Q changes the call; news before it is already in the numbers.
+  const w = (k, date) => ({ at: '2026-11-13', [k]: { date, quote: 'q', source: 's' } });
+  assert.equal(classifyCredit({ ...row, flags: { maturities: mats }, web: w('refi', '2026-10-01') }).verdict, 'maybe');
+  assert.equal(classifyCredit({ ...row, flags: { maturities: mats }, web: w('refi', '2026-05-01') }).verdict, 'target');
+  assert.equal(classifyCredit({ ...row, flags: { maturities: mats }, web: w('adviser', '2026-10-01') }).verdict, 'maybe');
+  assert.equal(classifyCredit({ ...row, flags: { maturities: mats }, web: w('sale', null) }).verdict, 'maybe');
+  assert.ok(classifyCredit({ ...row, flags: { maturities: mats }, web: { at: '2026-11-13' } }).reasons.some(r => /no refinancing, adviser or sale news/.test(r.text)));
+  console.log('company web ok');
 }

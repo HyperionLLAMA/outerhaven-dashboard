@@ -8,6 +8,7 @@
 //   day; targets re-checked after RECHECK_DAYS). Admin (user JWT): action 'check' {id} = Check web now.
 // Keys: SERPER_API_KEY and/or EXA_API_KEY (pasted in HQ → Fund signals → Setup, write-only). No key = nothing runs.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { companyQueries, readCompany, brand } from "./company.js";
 import { queriesFor, summaryQuery, readResults, SCHEMA, EXCLUDE, serperQueries, scanPage, htmlText, cleanName } from "./read.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -21,7 +22,9 @@ const DAY = 864e5;
 const EST = 0.05;          // worst-case cost of one fund with Exa, used to stop before going over the budget
 const SERPER_PRICE = 0.001; // per search ($50 for 50,000 credits; cheaper on bigger packs)
 const EST_SERPER = 3 * SERPER_PRICE;
-const PAGES = 4;           // pages fetched per fund (those naming the manager, snippet hits first)
+const PAGES = 4;
+// Credit / BDC targets (company.js): 2 searches each, past year only. Separate daily cap, same monthly budget.
+const CO_PER_RUN = 4, CO_DAILY_CAP = 60, CO_RECHECK_DAYS = 30, EST_CO = 2 * SERPER_PRICE;           // pages fetched per fund (those naming the manager, snippet hits first)
 
 // Monthly budget (growth_settings.fund_web_budget, default $10, set in Fund signals → Setup), spread evenly over the days
 // left so it doesn't run dry in the first week. Spend = Exa's own costDollars, logged per fund in fund_web_runs.
@@ -62,8 +65,8 @@ async function exa(key: string, s: any, q: { query: string; since: string | null
   return { results: (j.results || []) as any[], cost: Number(j.costDollars?.total) || 0 };
 }
 
-async function serper(key: string, q: string) {
-  const r = await fetch("https://google.serper.dev/search", { method: "POST", headers: { "content-type": "application/json", "X-API-KEY": key }, body: JSON.stringify({ q, num: 10 }) });
+async function serper(key: string, q: string, tbs?: string) {
+  const r = await fetch("https://google.serper.dev/search", { method: "POST", headers: { "content-type": "application/json", "X-API-KEY": key }, body: JSON.stringify(tbs ? { q, num: 10, tbs } : { q, num: 10 }) });
   if (r.status === 401 || r.status === 403) throw new Error(`Serper key rejected (${r.status})`);
   if (!r.ok) throw new Error(`Serper HTTP ${r.status}: ${(await r.text()).slice(0, 160)}`);
   return ((await r.json()).organic || []) as any[];
@@ -123,16 +126,54 @@ async function checkFund(s: any, keys: { serper: string; exa: string }, allowExa
   return web;
 }
 
+// One Credit or BDC company: Google the past year, read the pages naming it, store web, mark stale (rules_version 0) so its
+// own cron re-judges it (fund-signals cron for credit, signal-contacts retryStale for BDC).
+async function checkCompany(kind: "credit" | "bdc", row: any, key: string) {
+  const b = brand(row.company_name).toLowerCase(), qs = companyQueries(row.company_name);
+  const hits = (await Promise.all(qs.map(q => serper(key, q, "qdr:y")))).flat();
+  const seen = new Set<string>(), cands: any[] = [];
+  for (const h of hits) {
+    if (!h.link || seen.has(h.link) || EXCLUDE.includes(hostOf(h.link))) continue;
+    seen.add(h.link);
+    if (`${h.title} ${h.snippet}`.toLowerCase().includes(b)) cands.push(h);
+  }
+  const pages = await Promise.all(cands.slice(0, PAGES).map(async h => ({ url: h.link, date: h.date, text: (await page(h.link)) || `${h.title}. ${h.snippet || ""}` })));
+  // Snippets of the pages we didn't fetch still count (Google's own text, same-sentence rule applies).
+  for (const h of cands.slice(PAGES, 12)) pages.push({ url: h.link, date: h.date, text: `${h.title}. ${h.snippet || ""}` });
+  const cost = qs.length * SERPER_PRICE, web = { ...readCompany(row.company_name, pages), via: "serper", cost };
+  const table = kind === "credit" ? "credit_signals" : "bdc_signals";
+  const up = await sb.from(table).update({ web, web_checked_at: new Date().toISOString(), rules_version: 0 }).eq("id", row.id);
+  if (up.error) throw new Error(up.error.message);
+  await sb.from("fund_web_runs").insert({ kind, fund_key: `${kind}:${row.cik || row.company_key}`, signal_id: row.id, pages: web.pages, facts: web.facts, cost_usd: cost });
+  return web;
+}
+async function companies(key: string, budgetLeft: number) {
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const done = (await sb.from("fund_web_runs").select("id", { count: "exact", head: true }).neq("kind", "fund").gte("created_at", today.toISOString())).count || 0;
+  const n = Math.min(CO_PER_RUN, CO_DAILY_CAP - done, Math.floor(budgetLeft / EST_CO));
+  if (n <= 0) return { skipped: done >= CO_DAILY_CAP ? "daily cap" : "budget" };
+  const old = new Date(Date.now() - CO_RECHECK_DAYS * DAY).toISOString(), due = `web_checked_at.is.null,web_checked_at.lt.${old}`;
+  // BDC refinancing targets first (the main lane), then credit targets; best score first.
+  const bdc = ((await sb.from("bdc_signals").select("*").eq("verdict", "target").eq("lane", "refi").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["bdc", r]);
+  const cr = ((await sb.from("credit_signals").select("*").eq("verdict", "target").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["credit", r]);
+  const picked = [...bdc, ...cr].slice(0, n) as [("credit" | "bdc"), any][];
+  return { checked: await Promise.all(picked.map(async ([k, r]) => {
+    try { const w = await checkCompany(k, r, key); return { kind: k, company: r.company_name, refi: !!w.refi, adviser: !!w.adviser, sale: !!w.sale }; }
+    catch (e) { return { kind: k, company: r.company_name, error: String(e instanceof Error ? e.message : e).slice(0, 160) }; }
+  })) };
+}
+
 async function keysNow() { return { serper: await secret("SERPER_API_KEY"), exa: await secret("EXA_API_KEY") }; }
 async function cron() {
   const keys = await keysNow();
   if (!keys.serper && !keys.exa) return { skipped: "no Serper or Exa key" };
   const est = keys.serper ? EST_SERPER : EST;
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-  const done = (await sb.from("fund_web_runs").select("id", { count: "exact", head: true }).gte("created_at", today.toISOString())).count || 0;
-  if (done >= DAILY_CAP) return { skipped: "daily cap", done };
+  const done = (await sb.from("fund_web_runs").select("id", { count: "exact", head: true }).eq("kind", "fund").gte("created_at", today.toISOString())).count || 0;
   const b = await budget();
   if (b.todayLeft < est) return { skipped: "budget", spent: +b.spent.toFixed(2), cap: b.cap };
+  const co = keys.serper ? await companies(keys.serper, b.todayLeft) : { skipped: "no Serper key" };
+  if (done >= DAILY_CAP) return { skipped: "daily cap", done, companies: co };
   const old = new Date(Date.now() - RECHECK_DAYS * DAY).toISOString();
   const rows = (await sb.from("fund_signals").select("*").in("list", ["live", "fund1"]).in("verdict", ["target", "maybe"]).neq("status", "dismissed")
     .or(`web_checked_at.is.null,web_checked_at.lt.${old}`).order("score", { ascending: false }).limit(60)).data || [];
@@ -146,7 +187,7 @@ async function cron() {
     try { const w = await checkFund(s, keys, s.verdict === "target" && left >= EST); left -= w.cost; out.push({ fund: s.company_name, via: w.via, final: !!w.final, later: !!w.later, aum: w.aum?.amount || null }); }
     catch (e) { out.push({ fund: s.company_name, error: String(e instanceof Error ? e.message : e).slice(0, 160) }); if (String(e).includes("key rejected")) break; }
   }
-  return { checked: out };
+  return { checked: out, companies: co };
 }
 
 Deno.serve(async req => {
@@ -168,6 +209,14 @@ Deno.serve(async req => {
       const s = (await sb.from("fund_signals").select("*").eq("id", body.id).maybeSingle()).data;
       if (!s) return json({ ok: false, error: "Fund not found" }, 404);
       return json({ ok: true, web: await checkFund(s, keys, b.left >= EST) });
+    }
+    if (body.action === "check_company") {
+      const key = await secret("SERPER_API_KEY");
+      if (!key) return json({ ok: false, error: "No Serper key yet: paste one in Fund signals → Setup." });
+      const kind = body.kind === "bdc" ? "bdc" : "credit";
+      const row = (await sb.from(kind === "credit" ? "credit_signals" : "bdc_signals").select("*").eq("id", body.id).maybeSingle()).data;
+      if (!row) return json({ ok: false, error: "Company not found" }, 404);
+      return json({ ok: true, web: await checkCompany(kind, row, key) });
     }
     return json({ ok: false, error: "Unknown action" }, 400);
   } catch (e) {

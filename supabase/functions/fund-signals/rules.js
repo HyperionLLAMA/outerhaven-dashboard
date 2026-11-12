@@ -440,7 +440,21 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 12;
+export const CREDIT_RULES_VERSION = 13;
+// Company web check (fund-web company.js, 13 Nov 2026): news from the past year that makes a maturity pitch wrong. A fact dated
+// before our filing is already in the numbers (info); after it, or undated, it changes the call.
+export function webNews(web, since) {
+  const out = [];
+  if (!web) return out;
+  const when = f => f.date ? `news ${f.date}` : 'news, date unknown', src = f => ` (${f.source || 'web'}: "${String(f.quote).slice(0, 160)}")`;
+  const fresh = f => !f.date || !since || f.date > since;
+  if (web.sale) out.push(fresh(web.sale) ? { tone: 'maybe', pts: -20, text: `Being sold (${when(web.sale)}): the buyer decides how its debt is refinanced${src(web.sale)}` } : { tone: 'info', pts: 0, text: `Sale news from ${web.sale.date}, before the filing: check it's still live${src(web.sale)}` });
+  if (web.refi) out.push(fresh(web.refi) ? { tone: 'maybe', pts: web.refi.date ? -15 : -5, text: `May already be refinanced (${when(web.refi)}): read it before any message${src(web.refi)}` } : { tone: 'info', pts: 0, text: `Financing news from ${web.refi.date}, before the filing (already in its numbers)${src(web.refi)}` });
+  if (web.adviser && fresh(web.adviser)) out.push({ tone: 'maybe', pts: -10, text: `Already has a banker or adviser (${when(web.adviser)}): we'd be second in line${src(web.adviser)}` });
+  if (!web.sale && !web.refi && !web.adviser) out.push({ tone: 'info', pts: 0, text: `Web check ${web.at}: no refinancing, adviser or sale news in the past year` });
+  return out;
+}
+
 // Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
 // cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
 export const CREDIT_TAGS = {
@@ -498,6 +512,7 @@ export function classifyCredit(s) {
     const nd = f.new_debt_8k;
     if (nd && nd.date > (f.maturities?.filed || '')) add('maybe', `New debt 8-K (Item 2.03) filed ${nd.date}, after the ${f.maturities?.form || 'filing'}: the ${on} maturity may already be refinanced. Read the 8-K first`, -15);
   }
+  for (const n of webNews(s.web, f.maturities?.filed || s.period_end)) add(n.tone, n.text, n.pts);
   const dueNow = dc >= 10e6 && cash != null && dc > cash;
   if (dueNow && real && real.length && !soon) add('maybe', 'Balance sheet shows debt due within 12 months, but the filing dates every maturity 2+ years out: check the debt note');
   if (dueNow) { trigger = true; add('good', `${money(dc)} of term debt due within 12 months vs ${money(cash)} cash${when}: must refinance`, 30 + Math.min(15, Math.round((dc / Math.max(cash, 1e6) - 1) * 5))); }

@@ -44,4 +44,7 @@ const best = { company_name: 'Best Co', facility: 25e6, mark: 90, prev_mark: 95,
 assert.equal(classifyBdc(best, today).score, 100);
 const bestSale = { company_name: 'Sale Co', facility: 30e6, mark: 70, prev_mark: 80, nonaccrual: true, earliest_maturity: '2027-06-30', lenders: 2, holders: [{ bdc: 'FIDUS INVESTMENT CORP' }, { bdc: 'MONROE CAPITAL CORP' }], period: '2026-06-30' };
 assert.equal(classifyBdc(bestSale, today).score, 100);
+// v7: company web check (news after the lenders' report)
+assert.equal(classifyBdc({ ...best, web: { at: '2026-11-13', refi: { date: '2026-09-15', quote: 'q' } } }, today).verdict, 'maybe');
+assert.equal(classifyBdc({ ...best, web: { at: '2026-11-13', refi: { date: '2026-03-15', quote: 'q' } } }, today).verdict, 'target');
 console.log('bdc rules ok');

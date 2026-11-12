@@ -147,6 +147,7 @@ function rowHtml(s) {
       ${markBtns(s)}
       ${s.status !== 'added' ? `<button class="btn sm ${s.verdict === 'target' ? 'primary' : ''}" data-add="${s.id}">Add to pipeline</button>` : '<span class="pFlag good">In pipeline</span>'}
       <button class="btn sm" data-copy="${s.id}">Copy message</button>
+      <button class="btn sm ghost" data-news="${s.id}" title="Google the past year for a refinancing, an adviser hired or a sale before anyone messages them">${s.web ? 'Re-check news' : 'Check news'}</button>
       ${s.status === 'dismissed' ? `<button class="btn sm ghost" data-undo="${s.id}">Restore</button>` : s.status !== 'added' ? `<button class="btn sm ghost" data-dismiss="${s.id}">Dismiss</button>` : ''}
     </div></article>`;
 }
@@ -165,6 +166,15 @@ function bind(shown) {
   $$('[data-copy]', el).forEach(b => b.onclick = async () => {
     const t = opener(find(b.dataset.copy));
     try { await navigator.clipboard.writeText(t); toast('Message copied. Put their name in before sending.'); } catch { modal({ title: 'Message', submit: '', body: `<textarea class="input" rows="6" style="width:100%">${esc(t)}</textarea>` }); }
+  });
+  $$('[data-news]', el).forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Searching…';
+    const { data, error } = await sb.functions.invoke('fund-web', { body: { action: 'check_company', kind: 'bdc', id: b.dataset.news } });
+    b.disabled = false; b.textContent = 'Re-check news';
+    if (error || data?.ok === false) { toast(data?.error || error?.message || 'News check failed'); return; }
+    const w = data.web || {}, hit = [w.refi && 'a refinancing', w.adviser && 'an adviser or sale process', w.sale && 'a sale'].filter(Boolean);
+    toast(hit.length ? `Found ${hit.join(', ')}. The score updates within 30 min.` : `No refinancing, adviser or sale news in ${w.pages || 0} pages.`);
+    const r = rows.find(x => x.id === b.dataset.news); if (r) r.web = w;
   });
   $$('[data-dismiss],[data-undo]', el).forEach(b => b.onclick = async () => {
     const id = b.dataset.dismiss || b.dataset.undo, st = b.dataset.dismiss ? 'dismissed' : 'new';

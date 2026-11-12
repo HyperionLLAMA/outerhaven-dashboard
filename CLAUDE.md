@@ -260,6 +260,16 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   runs only when Serper found nothing, for `target` verdicts, with an Exa-sized amount of today's budget left (or with no Serper key).
   `web.via` = serper | serper+exa | exa. Caps: 6 funds a run, 150 a day. Key via Setup (`set_contact_key` SERPER_API_KEY). Serper
   price assumed $0.001 a search (`SERPER_PRICE`). Migration `supabase/2026-11-13-fund-web-serper.sql`. Tests in test_fund_web.mjs.
+- **Company news check for Credit + BDC (13 Nov 2026, Tengku: "make private credit automatic too"):** `fund-web` also checks credit
+  targets and BDC refi targets (`supabase/functions/fund-web/company.js`, test `node scripts/tests/test_company_web.mjs`): two Serper
+  searches each, past year only (`tbs qdr:y`), pages read in code; a fact needs the company's brand (`brand()`) and the cue in the SAME
+  sentence: `refi` (refinanced / new facility / amend-and-extend / notes priced), `adviser` (retained an adviser, strategic alternatives),
+  `sale` (to be acquired; the company buying something doesn't count). Stored in `credit_signals.web` / `bdc_signals.web` (+ `web_checked_at`),
+  row set `rules_version` 0 → re-judged by the fund-signals cron (credit) or signal-contacts `retryStale()` (BDC). Rules `webNews()` (copied in
+  both rules.js): news after the filing / lenders' report (or undated) = refi Maybe −15 (−5 undated), adviser Maybe −10, sale Maybe −20; news
+  before it = info. CREDIT_RULES_VERSION 13, BDC_RULES_VERSION 7. 4 companies a run, 60 a day, re-checked after 30 days, same monthly budget
+  (`fund_web_runs.kind` = fund | credit | bdc). Cards: "Check news" (fund-web action `check_company` {kind, id}). Migration
+  `supabase/2026-11-13-company-web.sql`. Auto-send stays OFF (Tengku, 13 Nov): the batch click stays human.
 - **Will they pay? (13 Nov 2026):** `people.pay_score` 0–5 (+ `pay_note`, `pay_at`) set in the Pipeline update window: demonstrated
   willingness from a conversation, never predicted (0 unknown, 1 no / free intros only, 2 resists upfront fees, 3 open to a paid scope,
   4 discussing budget / terms / pilot, 5 signed and paid). It's the "who paid, who didn't, why" log per signal source.
