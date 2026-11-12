@@ -86,3 +86,27 @@ for (const [n, want] of [['Plug & Play Financial Services Fund I, L.P.', 'other'
   ['Five Point Natural Gas Yield Fund I LP', 'infra'], ['Acme Multifamily Income Fund II', 'real_estate'], ['Acme Ventures Fund II', 'venture'], ['KING STREET REAL ESTATE SPECIAL SITUATIONS (EUROPE) FUND II, L.P.', 'real_estate']])
   assert.equal(strategyOf({ company_name: n }), want, n);
 console.log('strategy ok');
+
+// Form D Item 15 (13 Nov 2026): commissions on a closed Fund I = a buyer of placement help, not a cut. Still raising = cut.
+const closedF1 = fund({ first_sale: ago(30), filing_date: ago(30), amended_at: ago(20), sold: 40e6, still_raising: null, commissions: 400e3 });
+r = classify(closedF1, now);
+assert.notEqual(r.verdict, 'cut'); assert.ok(r.reasons.some(x => /proven buyer/.test(x.text)));
+r = classify(fund({ first_sale: ago(14), sold: 12e6, commissions: 200e3 }), now);
+assert.equal(r.verdict, 'cut', 'agent still working the open raise');
+assert.equal(classify({ ...fl, commissions: 100e3 }, now).verdict, 'cut', 'live raise with an agent stays cut');
+
+// Web check (fund-web): a quoted final close closes an unclear Fund I and sets its size; a closed newer fund cuts it.
+const unclear = fund({ first_sale: ago(20), filing_date: ago(10), amended_at: null, check_status: 'clear', still_raising: null, sold: 10e6 });
+assert.equal(classify(unclear, now).stage, 'unclear');
+const fin = { fund_no: 1, event: 'final_close', amount: 38e6, date: '2025-11', source: 'example.com' };
+r = classify({ ...unclear, web: { at: '2026-11-13', pages: 6, final: fin } }, now);
+assert.equal(r.stage, 'closed'); assert.ok(r.reasons.some(x => /Web: Fund I held its final close at \$38M/.test(x.text)));
+r = classify({ ...unclear, web: { at: '2026-11-13', pages: 6, final: fin, later: { fund_no: 2, event: 'final_close', amount: 80e6, date: '2026-09', source: 'x.com' } } }, now);
+assert.equal(r.verdict, 'cut');
+r = classify({ ...unclear, web: { at: '2026-11-13', pages: 6, final: fin, later: { fund_no: 2, event: 'first_close', amount: 30e6, source: 'x.com' } } }, now);
+assert.ok(r.reasons.some(x => /already in the market/.test(x.text)));
+// Live raise whose final close is on the web: nothing left to place.
+assert.equal(classify({ ...fl, web: { at: '2026-11-13', pages: 4, final: { ...fin, fund_no: 2 } } }, now).verdict, 'cut');
+// Web AUM over $500M cuts like a Form ADV total.
+assert.equal(classify({ ...unclear, web: { at: '2026-11-13', pages: 3, aum: { amount: 900e6, source: 'firm.com' } } }, now).verdict, 'cut');
+console.log('web + commissions ok');

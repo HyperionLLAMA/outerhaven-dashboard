@@ -146,6 +146,21 @@ async function loadCut(l) {
   if (el?.isConnected) draw();
 }
 
+// Web check (fund-web, Exa): each fact with its quote and source page. Facts only count when quoted word for word.
+const EVT = { final_close: 'Final close', first_close: 'First close', interim_close: 'Interim close', launch: 'Launched', raising: 'Raising' };
+function webBlock(s) {
+  const w = s.web;
+  if (!w) return '';
+  const line = (label, f) => `<li><b>${esc(label)}</b>${f.amount ? ` ${money(f.amount)}` : ''}${f.date ? ` · ${esc(f.date)}` : ''} · <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.source || 'source')} ↗</a><br><span class="muted s">“${esc(f.quote)}”</span></li>`;
+  const items = [
+    w.final && line(`Fund ${ROMAN[w.final.fund_no] || ''} ${EVT.final_close.toLowerCase()}`, w.final),
+    w.first && line(`Fund ${ROMAN[w.first.fund_no] || ''} ${EVT[w.first.event]?.toLowerCase() || 'close'}`, w.first),
+    w.later && line(`Fund ${ROMAN[w.later.fund_no] || ''} ${EVT[w.later.event]?.toLowerCase() || w.later.event}`, w.later),
+    w.aum && line('Firm AUM', w.aum),
+  ].filter(Boolean);
+  return `<details class="fsPrep"><summary>Web check ${esc(w.at || '')}: ${items.length ? `${items.length} fact${items.length > 1 ? 's' : ''} found` : `nothing found in ${w.pages || 0} pages`}</summary>${items.length ? `<ul>${items.join('')}</ul>` : '<p class="s muted">No quoted close, newer fund or AUM on pages naming this manager. Not proof it hasn\'t closed: ask on the first call.</p>'}</details>`;
+}
+
 function rowHtml(s) {
   const pct = s.offering && s.sold != null ? Math.round(s.sold / s.offering * 100) : null;
   const facts = [
@@ -171,6 +186,7 @@ function rowHtml(s) {
       <div class="fsFacts">${facts.map(f => `<span>${f}</span>`).join('')}<span class="muted">Filed ${day(s.filing_date)}${s.form_type === 'D/A' ? ' (amendment)' : ''}${s.amended_at ? ` · numbers from the ${s.amendment_url ? `<a href="${esc(s.amendment_url)}" target="_blank" rel="noopener">latest filing ↗</a>` : 'latest filing'} (${day(s.amended_at)})` : ' · numbers from the first filing'}</span></div>
       ${whyBlock(s.reasons, esc)}
       ${chk ? `<div class="fsCheck">${chk}</div>` : ''}
+      ${webBlock(s)}
       <details class="fsPrep"><summary>Call prep: what to find out</summary><ol>${prep(s).map(q => `<li>${esc(q)}</li>`).join('')}</ol></details>
       ${ppl.length ? `<div class="fsPeople">${ppl.map(p => `<a href="${liSearch(p.name, s)}" target="_blank" rel="noopener" title="Search LinkedIn">${esc(p.name)} ↗</a>`).join('')}${(s.executives || []).length > 4 ? `<span class="muted">+${s.executives.length - 4} more</span>` : ''}</div>` : ''}
     </div>
@@ -179,6 +195,7 @@ function rowHtml(s) {
       ${s.status !== 'added' ? `<button class="btn sm ${s.verdict === 'target' ? 'primary' : ''}" data-add="${s.id}">Add to pipeline</button>` : '<span class="pFlag good">In pipeline</span>'}
       <button class="btn sm" data-copy="${s.id}">Copy opener</button>
       ${!['checking', 'queued'].includes(s.check_status) ? `<button class="btn sm" data-check="${s.id}">${s.check_status ? 'Re-check' : s.list === 'live' ? 'Check newer filings' : 'Check for next fund'}</button>` : ''}
+      <button class="btn sm" data-web="${s.id}" title="Search the web (Exa) for this fund's close, a newer fund and the firm's AUM">${s.web ? 'Re-check web' : 'Check web'}</button>
       ${s.filing_url ? `<a class="btn sm ghost" href="${esc(s.filing_url)}" target="_blank" rel="noopener">Filing ↗</a>` : ''}
       ${s.status === 'dismissed' ? `<button class="btn sm ghost" data-undo="${s.id}">Restore</button>` : s.status !== 'added' ? `<button class="btn sm ghost" data-dismiss="${s.id}">Dismiss</button>` : ''}
     </div></article>`;
@@ -235,6 +252,14 @@ function bind(shown) {
     catch (e) { toast(e.message); if (btn) btn.disabled = false; }
   };
   $$('[data-check]', el).forEach(b => b.onclick = () => runCheck([b.dataset.check], b));
+  $$('[data-web]', el).forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Searching…';
+    const { data, error } = await sb.functions.invoke('fund-web', { body: { action: 'check', id: b.dataset.web } });
+    if (error || data?.ok === false) { toast(data?.error || error?.message || 'Web check failed'); b.disabled = false; b.textContent = 'Check web'; return; }
+    const w = data.web || {};
+    toast(w.final || w.first || w.later || w.aum ? 'Web check done: facts added to the card.' : `Web check done: nothing found in ${w.pages || 0} pages.`);
+    await load(); draw();
+  });
   $('#fsCheckAll', el)?.addEventListener('click', e => runCheck(shown.filter(s => !s.check_status).map(s => s.id), e.target));
   $$('[data-copy]', el).forEach(b => b.onclick = async () => {
     const s = find(b.dataset.copy), t = opener(s);
@@ -299,6 +324,11 @@ function settingsModal() {
         <li>Paste it here: <input type="password" id="fsGhTok" placeholder="github_pat_… or ghp_…" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsGhSave">Save</button> <button type="button" class="btn sm ghost" id="fsGhClear">Remove</button></li>
       </ol>
       <p id="fsGhStatus" class="s muted">Checking…</p>
+      <h4>Web checks (Exa)</h4>
+      <p>Form D can't say if a fund held its final close, for how much, if a newer fund is already out, or the firm's AUM. HQ asks the web: two Exa searches per fund (its name, then the people on its Form D), and keeps a fact only when the page names the manager and the quote is on the page word for word. Every 30 min the best unchecked targets are checked (40 funds a day, about $0.03–0.05 each); targets are re-checked after 45 days. "Check web" on a card runs one now.</p>
+      <ol><li>Get a key at <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai ↗</a>.</li>
+      <li>Paste it here: <input type="password" id="fsExa" placeholder="Exa API key" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsExaSave">Save</button></li></ol>
+      <p id="fsExaStatus" class="s muted">Checking…</p>
       <p class="s muted">The key only lets GitHub add filings and check results to this tab. If it leaks, tell Claude to rotate FUND_INGEST_SECRET and paste the new one.</p></div>`,
   });
   const ghStatus = async () => {
@@ -311,6 +341,15 @@ function settingsModal() {
       : last ? `Token saved. Last run started from HQ: ${last.mode}, ${new Date(last.created_at).toLocaleString()}: ${ans(last)}.` : 'Token saved. The first run starts at the next :10.';
   };
   ghStatus();
+  const exaStatus = async () => { const { data } = await sb.rpc('contact_keys_set'); const e = $('#fsExaStatus', m); if (e) e.textContent = data?.exa ? 'Exa key saved: web checks run every 30 min.' : 'No Exa key yet: web checks are off.'; };
+  exaStatus();
+  $('#fsExaSave', m).onclick = async () => {
+    const v = $('#fsExa', m).value.trim(); $('#fsExa', m).value = '';
+    if (v.length < 16) { toast('That doesn\'t look like an Exa key.'); return; }
+    const { error } = await sb.rpc('set_contact_key', { p_name: 'EXA_API_KEY', p_value: v });
+    if (error) { toast('Could not save: ' + error.message); return; }
+    toast('Saved. Web checks start at the next :05 or :35.'); exaStatus();
+  };
   $('#fsGhSave', m).onclick = async () => {
     const v = $('#fsGhTok', m).value.trim();
     if (!/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(v)) { toast('That doesn\'t look like a GitHub token.'); return; }
@@ -341,7 +380,8 @@ function howModal() {
       <h4>3. Automatic cuts (a fund is cut if any one applies)</h4>
       <ul><li>A single-deal vehicle: SPV, co-invest, "a series of", splitter, continuation fund.</li>
       <li>A big brand or wealth platform (Apollo, Ares, a16z, iCapital, CAIS…): they have their own fundraising team.</li>
-      <li>Sales commissions or finder's fees above $0: they already pay someone to raise.</li>
+      <li>Raising now (or a next-fund manager still raising): sales commissions or finder's fees above $0, they already pay someone on this raise. On a closed fund it scores the other way (+6): they buy outside fundraising help.</li>
+      <li>The web check quotes a final close of this raise, or a newer fund that already closed.</li>
       <li>Raising now: target under $50M or over $250M, 60%+ already raised, or Fund IV and up.</li>
       <li>Fund I list: Fund I under $10M or over $75M, or a later fund already filed.</li></ul>
       <h4>4. "Maybe" (needs a human look)</h4>

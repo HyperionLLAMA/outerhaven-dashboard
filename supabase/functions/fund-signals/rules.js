@@ -3,7 +3,7 @@
 // Every verdict carries its reasons, so HQ can show exactly why a fund was kept or cut.
 
 // Bump when the rules change: the cron re-judges every stored signal on the old version.
-export const RULES_VERSION = 24;
+export const RULES_VERSION = 25;
 export const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
 export const romanOf = n => Object.keys(ROMAN).find(k => ROMAN[k] === n) || '';
 const US = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA PR RI SC SD TN TX UT VT VA WA WV WI WY'.split(' '));
@@ -109,8 +109,14 @@ export function classify(s, now = Date.now()) {
   let stage = s.list === 'live' ? 'raising' : null, expected = null;
   if (VEHICLE.test(name)) add('cut', 'Single-deal vehicle (SPV, co-invest or series), not a fund raising from investors');
   if (BRANDS.test(name) || BRANDS.test(s.executives_text || '')) add('cut', 'Big brand or wealth platform: has its own fundraising team');
-  if (s.commissions > 0) add('cut', `Already pays a placement agent (${money(s.commissions)} in sales commissions)`);
-  else if (s.finders > 0) add('cut', `Already pays a finder (${money(s.finders)})`);
+  // Form D Item 15 (13 Nov 2026, Tengku): sales commissions / finder's fees on a raise. On the live list the agent is already hired
+  // for this raise (cut). On the next-fund list it is the best sign there is that the manager BUYS outside fundraising help, so
+  // it scores for the next fund, unless that same fund is still open (then the agent is still working it).
+  const paid = s.commissions > 0 ? `${money(s.commissions)} in sales commissions` : s.finders > 0 ? `${money(s.finders)} in finder's fees` : '';
+  if (paid && s.list === 'live') add('cut', `Already pays a placement agent on this raise (${paid})`);
+  // Web check (fund-web + Exa, 13 Nov 2026): facts quoted word for word from a page naming the manager. Shown with the source.
+  const web = s.web || null, wsrc = f => `${f.source}${f.date ? `, ${f.date}` : ''}`, wamt = f => f.amount ? ` at ${money(f.amount)}` : '';
+  const EVT = { final_close: 'final close', first_close: 'first close', interim_close: 'interim close', launch: 'launched', raising: 'raising' };
   if (s.state && !US.has(s.state)) add('maybe', `Non-US manager (state code ${s.state})`);
   if (!(s.executives || []).length) add('maybe', 'No named people in the filing, only entities');
   // A fund's legal name nearly always says what it is; "MCF SpaceX-I LLC" or "TS Rover I, LLC" is usually a one-deal vehicle.
@@ -139,6 +145,9 @@ export function classify(s, now = Date.now()) {
     if (months != null && months > 24 && pctSold != null && pctSold < 0.3 && s.first_sale) add('maybe', `Open ${Math.round(months)} months with only ${pctTxt(pctSold)} raised: a stalled raise or an always-open vehicle, not a live fundraise`, -15);
     else if (months != null && months >= 6 && pctSold != null && pctSold < 0.3 && s.first_sale) add('good', `Stuck: only ${pctTxt(pctSold)} raised in ${Math.round(months)} months. They need help, but ask why investors are passing (a stall is also a weaker story)`, 20);
     else if (months != null && months >= 12 && pctSold == null && s.first_sale) add('good', `Still raising ${Math.round(months)} months after the first sale`, 20);
+    if (web?.final) add('cut', `Web: ${s.fund_no ? `Fund ${romanOf(s.fund_no)}` : 'this fund'} held its final close${wamt(web.final)} (${wsrc(web.final)}): nothing left to place`);
+    else if (web?.first) add('info', `Web: first close${wamt(web.first)} (${wsrc(web.first)})`);
+    if (web?.later) add('maybe', `Web: Fund ${romanOf(web.later.fund_no)} already announced (${EVT[web.later.event] || web.later.event}${wamt(web.later)}, ${wsrc(web.later)}): this raise may be old news`);
     // 19 Oct 2026 (Tengku, Future Labs Fund II: $6.5M of $65M in 19 months, Fund I closed $22.6M of $65M). Motivation is not the
     // problem mid-raise: a stuck GP wants help most. Placeability is. Re-ups come first in any raise, so a Fund II far below
     // Fund I after a year means Fund I's own investors aren't coming back, and a Fund I that missed its target is a weak story.
@@ -167,7 +176,9 @@ export function classify(s, now = Date.now()) {
     // is used only when no target is stated, or once the check has read the latest amendment.
     // Once an amendment (or the check) has given the money actually raised, that is the fund's real size: a $10M target
     // that raised $2.4M in three years (Horn of Africa Fund I) is a $2.4M fund.
-    const raisedFinal = (s.check_status || s.amended_at) && s.sold > 0 ? s.sold : null;
+    // A web-quoted final close beats the filings (funds often stop amending once closed).
+    const webAmt = web?.final?.amount || null;
+    const raisedFinal = webAmt || ((s.check_status || s.amended_at) && s.sold > 0 ? s.sold : null);
     const size = raisedFinal || s.offering || (s.sold > 0 ? s.sold : null), max = n === 2 ? 150e6 : 75e6;
     const word = raisedFinal ? 'raised' : s.offering ? 'targeted' : 'raised';
     if (!size) add('maybe', `${nm} size unknown (target "Indefinite", nothing raised yet at filing)`);
@@ -184,15 +195,18 @@ export function classify(s, now = Date.now()) {
     const lastAct = [s.filing_date, s.amended_at].filter(Boolean).sort().pop();
     const sinceAct = lastAct ? (now - Date.parse(lastAct)) / (30.44 * 864e5) : null;
     const known = !!(s.amended_at || ['clear', 'next', 'unsure'].includes(s.check_status));
-    const full = s.offering > 0 && s.sold > 0 ? s.sold / s.offering : null;
+    const full = s.offering > 0 && (webAmt || s.sold) > 0 ? (webAmt || s.sold) / s.offering : null;
     // Audit 8 Oct 2026: of 273 targets, 78 showed raised = target to the dollar and none raised more. Managers usually amend the
     // target down (or up) to the final size at close, so "100% of target" proves the fund closed, not that it hit its goal.
-    const reset = full != null && Math.abs(s.sold - s.offering) < 1;
+    const reset = !webAmt && full != null && Math.abs(s.sold - s.offering) < 1;
     // still_raising is stored at check time: it only counts while that filing is under 13 months old.
     stage = s.still_raising && sinceAct != null && sinceAct <= 13 ? 'raising' : full != null && full >= 0.95 ? 'closed' : known && sinceAct != null && sinceAct > 13 ? 'closed' : 'unclear';
     // 14 Oct 2026 (Tengku): still open 12+ months after the first sale = placement target for THIS fund, not a next-fund
     // pitch. Most Fund Is take 18-24 months; by month 12 the GP's own network is spent. Best with a first close, no agent.
     if (stage === 'raising' && months >= 12) stage = 'stuck';
+    if (web?.final) stage = 'closed';
+    if (paid && (stage === 'raising' || stage === 'stuck')) add('cut', `Already pays a placement agent on this raise (${paid})`);
+    else if (paid) add('good', `Paid for outside fundraising help on ${nm} (${paid}): a proven buyer of what we sell. Ask if the same agent does ${nextNm}`, 6);
     if (stage === 'stuck') {
       add('good', `Still raising ${nm} ${Math.round(months)} months after the first sale: pitch placement on this fund`, 15);
       // Tengku: a Fund I has no fund track record to sell. Only placeable on attributable deals from a prior firm or deal-by-deal.
@@ -201,10 +215,18 @@ export function classify(s, now = Date.now()) {
       else if (full != null && full >= 0.6) add('info', `Already ${pctTxt(full)} raised: little left to place`, -10);
       else if (full != null) add('good', `First close done: ${money(s.sold)} in (${pctTxt(full)}), ${money(s.offering - s.sold)} still to raise`, 10);
       if (months > 24 && !(full >= 0.3)) add('maybe', `Open over 2 years with under 30% raised: likely a stalled raise`, -10);
-    } else if (stage === 'raising') add('maybe', `Still raising ${nm} (${s.still_raising}), under 12 months in: too early to pitch. Revisit at 12 months for placement, or after it closes for ${nextNm}`);
+    } else if (stage === 'closed' && web?.final) add('good', `Web: ${nm} held its final close${wamt(web.final)} (${wsrc(web.final)})`, 12);
+    else if (stage === 'raising') add('maybe', `Still raising ${nm} (${s.still_raising}), under 12 months in: too early to pitch. Revisit at 12 months for placement, or after it closes for ${nextNm}`);
     else if (stage === 'closed' && full != null && full >= 0.95) add('good', `${nm} closed at ${money(s.sold)}${reset ? ' (the filing sets the target to the final size, so this proves it closed, not that it hit its first goal)' : ''}`, 12);
     else if (stage === 'closed') add('good', `${nm} raise has ended: no filing for ${Math.round(sinceAct)} months (open raises must re-file every year)`, 12);
     else add('info', `Not sure ${nm} has closed yet (last filing ${lastAct || 'unknown'}): confirm on the first call`);
+    if (web?.first && stage !== 'closed') add('info', `Web: ${nm} first close${wamt(web.first)} (${wsrc(web.first)})`);
+    // A newer fund already announced: closed = the next-fund pitch is over; still open = pitch placement on it now.
+    if (web?.later) {
+      const ln = `Fund ${romanOf(web.later.fund_no)}`;
+      if (web.later.event === 'final_close') add('cut', `Web: already closed ${ln}${wamt(web.later)} (${wsrc(web.later)})`);
+      else add('good', `Web: ${ln} already in the market (${EVT[web.later.event] || web.later.event}${wamt(web.later)}, ${wsrc(web.later)}): pitch placement on it now`, 10);
+    }
 
     // The manager's own history (8 Oct 2026, Tengku: their own pace beats the market average, but check both).
     const hist = s.history || [], myBase = base(s.company_name), myStart = s.first_sale || s.filing_date;
@@ -277,7 +299,10 @@ export function classify(s, now = Date.now()) {
   // Manager size (6 Oct 2026, Tengku): all its funds together under $150M = the target; $150-500M = keep, lower priority;
   // over $500M = established, cut. From the adviser's Form ADV (assets under management / private fund gross assets),
   // or the Form Ds of this manager's funds when no adviser filing is found.
-  const mt = s.manager_total != null ? Number(s.manager_total) : null, src = s.manager_total_src ? ` (${s.manager_total_src})` : '';
+  let mt = s.manager_total != null ? Number(s.manager_total) : null, src = s.manager_total_src ? ` (${s.manager_total_src})` : '';
+  // Firm AUM quoted on the web (fund-web): counts when it is larger than what the filings add up to.
+  if (web?.aum?.amount && (mt == null || web.aum.amount > mt)) { mt = web.aum.amount; src = ` (web: ${web.aum.source})`; }
+  if (web && !web.final && !web.first && !web.later && !web.aum) add('info', `Web check ${web.at}: no close, newer fund or AUM found in ${web.pages} pages`);
   if (mt != null && mt > 500e6) add('cut', `Manager runs ${money(mt)} in total${src}: established, not an emerging manager`);
   else if (mt != null && mt > 150e6) add('info', `Manager runs ${money(mt)} in total${src}: past emerging, lower priority`, -15);
   else if (mt != null && mt > 0) add('good', `Emerging manager: ${money(mt)} across all its funds${src}`, s.list === 'live' ? 20 : 12);
@@ -415,7 +440,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 11;
+export const CREDIT_RULES_VERSION = 12;
 // Lender-fit tags (4 Nov 2026, Tengku: "don't leave it at maybe, set tags"). Stored in credit_signals.tags, filtered in HQ.
 // cut = the company is out; the rest describe why it is (or isn't) a loan a private credit lender would write.
 export const CREDIT_TAGS = {
@@ -469,6 +494,9 @@ export function classifyCredit(s) {
       if (lev0 != null && lev0 >= 3) { trigger = true; add('good', `Revolving facility matures ${on} (${src}): a renewal its bank may not simply roll at this leverage`, 10); }
       else add('info', `Revolving facility matures ${on} (${src}): usually renewed by its bank`);
     } else { trigger = true; add('good', `Debt matures ${on} (${src}): a dated refinancing deadline`, soon.m <= 12 ? 25 : soon.m <= 18 ? 20 : 10); }
+    // v12 (13 Nov 2026): an 8-K Item 2.03 (new debt) filed after that 10-Q / 10-K usually means the loan was just refinanced.
+    const nd = f.new_debt_8k;
+    if (nd && nd.date > (f.maturities?.filed || '')) add('maybe', `New debt 8-K (Item 2.03) filed ${nd.date}, after the ${f.maturities?.form || 'filing'}: the ${on} maturity may already be refinanced. Read the 8-K first`, -15);
   }
   const dueNow = dc >= 10e6 && cash != null && dc > cash;
   if (dueNow && real && real.length && !soon) add('maybe', 'Balance sheet shows debt due within 12 months, but the filing dates every maturity 2+ years out: check the debt note');

@@ -67,3 +67,17 @@ console.log('net cash ok');
 const glx = classifyCredit({ ...healthy, flags: withItems(item(0.3, { kind: 'term' }), item(14, { kind: 'term' })) });
 assert.equal(glx.verdict, 'target', 'Galaxy: an old Nov 2026 date must not hide the Jan 2028 maturity');
 console.log('galaxy ok');
+
+// v12 (13 Nov 2026): a dated maturity followed by an 8-K Item 2.03 (new debt) is probably refinanced already: Maybe, not Target.
+{
+  const in10 = new Date(Date.now() + 10 * 30.44 * 864e5).toISOString().slice(0, 10);
+  const mats = { form: '10-Q', filed: '2026-08-10', url: 'x', items: [{ date: in10, kind: 'term', quote: 'term loan matures' }] };
+  const row = { ...base, debt_noncurrent: 60e6, cash: 5e6, revenue: 120e6, ebitda: 15e6, interest_expense: 5e6, public_float: 80e6 };
+  const live = classifyCredit({ ...row, flags: { maturities: mats } });
+  const done = classifyCredit({ ...row, flags: { maturities: mats, new_debt_8k: { date: '2026-10-01', items: '1.01,2.03,9.01', url: 'y' } } });
+  assert.equal(live.verdict, 'target');
+  assert.equal(done.verdict, 'maybe'); assert.ok(done.reasons.some(r => /may already be refinanced/.test(r.text)));
+  // An 8-K filed BEFORE the 10-Q doesn't count (the 10-Q already reflects it).
+  assert.equal(classifyCredit({ ...row, flags: { maturities: mats, new_debt_8k: { date: '2026-07-01' } } }).verdict, 'target');
+  console.log('new debt 8-K ok');
+}

@@ -477,6 +477,10 @@ async function dmModal({ name, url, personId, leadId, fallback }) {
 }
 
 // ---- Modals ----
+// Will they pay? (13 Nov 2026) Demonstrated willingness from what they said or did, never a guess. Feeds the "who paid, who
+// didn't, why" learning: the score per signal source tells us which lists produce paying clients.
+const PAY = [['', '— not discussed yet —'], ['0', '0 · Unknown'], ['1', '1 · No, or free intros only'], ['2', '2 · Interested, resists upfront fees'],
+  ['3', '3 · Open to a paid scope'], ['4', '4 · Discussing budget, terms or a pilot'], ['5', '5 · Signed and paid']];
 function updateModal(i) {
   const st = stagesFor(i.side), open = i.tasks;
   const who = state.user?.email ? firstName(state.user.email.split('@')[0]) : '';
@@ -489,7 +493,9 @@ function updateModal(i) {
       <label class="field">Who is next<select class="select" name="ball">${opts([['us', 'Us (we owe a move)'], ['them', 'Them (we are waiting)'], ['', 'Nobody yet']], i.ball || '')}</select></label>
       ${i.person && 'owner_name' in i.person ? `<label class="field">Lead owner<select class="select" name="lowner">${opts([['', '— none —'], ...['Tengku', 'Anaz', 'Chase', 'Peter', 'Razeen'].map(n => [n, n])], teamName(i.person.owner_name) || i.person.owner_name || '')}</select></label>
       <p class="muted s" style="margin:0;align-self:end">${i.met ? `Met. Follow-ups rotate ${ROTATION.join(' → ')}; next is <b>${esc(i.nextBy)}</b>.` : 'Talks to this one person until the first meeting.'}</p>` : ''}
-      ${i.person ? `<div style="grid-column:1/-1">${briefLine(i.person, true)}</div>` : ''}
+      ${i.person ? `<div style="grid-column:1/-1">${briefLine(i.person, true)}</div>
+      <label class="field">Will they pay?<select class="select" name="pay">${opts(PAY, i.person.pay_score == null ? '' : String(i.person.pay_score))}</select></label>
+      <label class="field">What they said about fees<input class="input" name="paynote" value="${esc(i.person.pay_note || '')}" placeholder="e.g. only success fee, asked for terms"></label>` : ''}
       ${open.length ? `<div class="field" style="grid-column:1/-1">Open tasks, tick what is done<div class="pTasks">${open.map(t => `<label><input type="checkbox" name="done" value="${t.id}"> <span>${esc(t.action)}</span><em class="muted s">${t.owner_name ? esc(firstName(t.owner_name)) : ''}${t.due_date ? ' · ' + fmtDate(t.due_date) : ''}${t.due_date && t.due_date < todayIso() ? ' · overdue' : ''}</em></label>`).join('')}</div></div>` : ''}
       <label class="field" style="grid-column:1/-1">Add the next step<input class="input" name="next" placeholder="${open.length ? 'Another step (optional)' : 'What is the next move?'}"></label>
       <label class="field">Owner<input class="input" name="owner" value="${esc(i.owner || who)}"></label>
@@ -500,6 +506,11 @@ function updateModal(i) {
       const done = fd.getAll('done'), park = fd.get('park') === 'on';
       const base = { updated_at: now }, ballChanged = (ball || null) !== (i.ball || null);
       const pExtra = { ...(fd.has('lowner') && (fd.get('lowner') || null) !== (i.person?.owner_name || null) ? { owner_name: fd.get('lowner') || null } : {}), ...metPatch(i.side, stage, i.person) };
+      if (fd.has('pay')) {
+        const pay = fd.get('pay') === '' ? null : +fd.get('pay'), note = String(fd.get('paynote') || '').trim() || null;
+        if (pay !== (i.person?.pay_score ?? null)) Object.assign(pExtra, { pay_score: pay, pay_at: now });
+        if (note !== (i.person?.pay_note || null)) pExtra.pay_note = note;
+      }
       if (ballChanged) { base.waiting_on = ball; base.waiting_on_since = now; }
       if (park) base.pipeline_active = false;
       for (const id of done) if (fail(await sb.from('tasks').update({ completed: true, updated_at: now }).eq('id', id), 'Complete task')) return false;

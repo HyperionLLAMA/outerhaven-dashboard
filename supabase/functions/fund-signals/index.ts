@@ -201,6 +201,12 @@ async function ingest(body: any) {
   const now = new Date().toISOString();
   const logRun = (kind: string, items: number, added: number, params: any, error: string | null = null) =>
     sb.from("fund_signal_runs").insert({ kind, status: error ? "failed" : "done", items, added, cost_usd: 0, cap_usd: 0, params: { source: "github", ...params }, error, finished_at: now });
+  // fund-web stored a web check on these rows (13 Nov 2026): judge them now instead of waiting for the 15-min cron.
+  if (body.kind === "rejudge") {
+    const rows = (await sb.from("fund_signals").select("*").in("id", (body.ids || []).slice(0, 500))).data || [];
+    await judge(rows);
+    return { rejudged: rows.length };
+  }
   if (body.kind === "todo") {
     const cols = "id,manager_key,check_keyword,cik,filing_date,fund_no,company_name,executives";
     const queued = (await sb.from("fund_signals").select(cols).eq("check_status", "queued").limit(300)).data || [];

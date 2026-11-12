@@ -179,13 +179,29 @@ def profile(cik):
     addr = (j.get("addresses") or {}).get("business") or {}
     recent = (j.get("filings") or {}).get("recent") or {}
     url = kind = filed = None
-    for form, acc, doc, fd in zip(recent.get("form", []), recent.get("accessionNumber", []), recent.get("primaryDocument", []), recent.get("filingDate", [])):
+    rows = list(zip(recent.get("form", []), recent.get("accessionNumber", []), recent.get("primaryDocument", []), recent.get("filingDate", []),
+                    recent.get("items", []) or [""] * len(recent.get("form", []))))
+    for form, acc, doc, fd, _items in rows:
         if form in ("10-K", "10-Q"):
             url, kind, filed = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}", form, fd
             break
-    return {"name": j.get("name"), "sic": j.get("sic"), "sicDesc": j.get("sicDescription"), "tickers": j.get("tickers") or [],
+    return {"newDebt8k": new_debt_8k(rows, cik, filed), "name": j.get("name"), "sic": j.get("sic"), "sicDesc": j.get("sicDescription"), "tickers": j.get("tickers") or [],
             "exchanges": [e for e in (j.get("exchanges") or []) if e], "state": addr.get("stateOrCountry"), "filingUrl": url,
             "filingForm": kind, "filingDate": filed}
+
+
+def new_debt_8k(rows, cik, after):
+    """Newest 8-K with Item 2.03 (a new direct financial obligation: a new credit agreement, notes, a term loan) filed after the
+    10-K / 10-Q we read maturities from (13 Nov 2026). The maturity in that filing may already be refinanced, so the rules
+    stop treating it as a live deadline until someone checks."""
+    if not after:
+        return None
+    for form, acc, doc, fd, items in rows:   # newest first
+        if fd <= after:
+            break
+        if form in ("8-K", "8-K/A") and "2.03" in (items or ""):
+            return {"date": fd, "items": items, "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}"}
+    return None
 
 
 def annual_revenue(cik):
@@ -310,6 +326,8 @@ def credit():
             flags["forbearance"] = forb[c]
         if c in gc:
             flags["going_concern"] = gc[c]
+        if p.get("newDebt8k"):
+            flags["new_debt_8k"] = p["newDebt8k"]
         # Real maturity dates + the filing's own words (6 Nov 2026): "due within 12 months" alone flagged revolvers and
         # convertibles maturing in 2029-30. Stored inside flags so no server change is needed.
         if p.get("filingUrl"):

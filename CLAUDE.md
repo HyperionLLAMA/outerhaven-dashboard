@@ -132,7 +132,7 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   hidden when their document exists. Migration `supabase/2026-10-10-deals-teaser-ready.sql`.
 
 ## Fund signals (Pipeline → Fund signals tab, `hq/funds.js`, admin only)
-- Finds US funds raising now (Form D, II/III in the name, pooled fund, $50–250M, <60% sold, no sales commissions) and Fund I / Fund II
+- Finds US funds raising now (Form D, II/III in the name, pooled fund, $50–250M, <60% sold, no sales commissions on this raise) and Fund I / Fund II
   managers inside the next-fund window who haven't filed their next fund under any name (list `fund1` holds both; `fund_no` tells them apart).
 - Windows come from the cadence study (`fund_gap_study`, cohorts `fund1-2019-v2` / `fund2-2019-v2`, rows keyed `<cohort>:<accession>`;
   next fund = first later fund by the same people 9+ months on, shorter gaps are parallel vehicles): Fund I → next median 24 months
@@ -236,6 +236,26 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   `manager_total_src`. Solomon Hess (Form ADV $1.08B) was the case that started it. Migration `supabase/2026-10-06-fund-adviser-size.sql`.
 - "Add to pipeline" creates Sell Side `people` (source 'Form D') + a task. Fund placement for a success fee needs a US broker-dealer.
 
+- **Web checks + Item 15 (13 Nov 2026, Tengku; RULES_VERSION 25):** Form D can't say whether a fund held its final close, for how much,
+  whether a newer fund is out, or the firm's AUM. Edge function `fund-web` (verify_jwt=false; `supabase/functions/fund-web/index.ts` +
+  pure `read.js`, test `node scripts/tests/test_fund_web.mjs`) runs two Exa `/search` calls per fund (fund name since its first sale; then
+  the Form D people + manager keyword), each with `contents.text` + a structured `summary` (JSON schema `SCHEMA`), SEC mirrors excluded.
+  Trust rule: nothing is taken from the LLM summary directly. A fact counts only if its quote is on the page word for word, the page
+  names the manager, and the fund name / quote carries the manager keyword; amounts come from the quote (`amountNear`, the amount after
+  the close / AUM cue), never the LLM. Stored on every vehicle of the fund_key: `fund_signals.web` {at, pages, facts, final, first, later,
+  aum, cost} + `web_checked_at`, then fund-signals ingest kind `rejudge` {ids} (rows also set `rules_version` 0 as a fallback).
+  pg_cron `fund-web` at :05/:35 (`invoke_fund_web()`, FUND_CRON_SECRET): best unchecked target/maybe funds, 4 a run, `DAILY_CAP` 40 a day
+  (counted in `fund_web_runs`, which logs Exa's `costDollars`), re-checked after 45 days. HQ card: "Check web" (admin action `check` {id})
+  and a "Web check" fold with each fact, its quote and source link. Key `EXA_API_KEY` via Fund signals → Setup (`set_contact_key`,
+  write-only; never enter it for the user). Rules: web final close of this fund = stage closed at that size (+12) on the next-fund list,
+  cut on the live list; newer fund closed = cut, newer fund in market = +10 "pitch placement on it now" (live list: Maybe); web AUM
+  counts as manager total when larger. Form D Item 15: sales commissions / finder's fees are a cut only on a raise still open (live, or
+  next-fund list raising/stuck); on a closed fund they are +6 "a proven buyer of fundraising help". Untested against the live Exa API:
+  the first cron run is the test (check `fund_web_runs` and a few `web` facts by hand). Migration `supabase/2026-11-13-fund-web-pay.sql`.
+- **Will they pay? (13 Nov 2026):** `people.pay_score` 0–5 (+ `pay_note`, `pay_at`) set in the Pipeline update window: demonstrated
+  willingness from a conversation, never predicted (0 unknown, 1 no / free intros only, 2 resists upfront fees, 3 open to a paid scope,
+  4 discussing budget / terms / pilot, 5 signed and paid). It's the "who paid, who didn't, why" log per signal source.
+
 ## Credit signals (Pipeline → Credit signals tab, `hq/credit.js`, admin only)
 - Small US public companies that need private credit (Peter's 35-year lane). `scripts/credit_signals.py` (GitHub workflow mode `credit`,
   also run by the daily job): XBRL frames for every filer (debt due within 12 months, long-term debt, cash at the latest quarter-end with
@@ -250,6 +270,9 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   `credit_done`, which sets `on_latest=false` (cut) on rows that run didn't send; tickers ending in Q (Chapter 11) are cut. Migration:
   `supabase/2026-10-02-credit-signals.sql`.
 
+- **New-debt 8-K (13 Nov 2026, CREDIT_RULES_VERSION 12):** `profile()` in credit_signals.py also returns the newest 8-K with Item 2.03 filed
+  after the 10-K / 10-Q we read maturities from → `flags.new_debt_8k` {date, items, url}. A dated maturity with one = Maybe −15 "may
+  already be refinanced, read the 8-K first" (an 8-K before that filing doesn't count). Test in test_credit_rules.mjs.
 - **Real maturity dates (6 Nov 2026, Tengku; `scripts/maturities.py`, self-check `python3 -I scripts/maturities.py`):** the balance sheet's
   "due within 12 months" also counts revolvers / convertibles that mature in 2029-30 (Bowman, Shutterstock, A10 were false alarms
   when checked by hand). Most filers don't tag maturity dates in XBRL (DLH doesn't), so the credit scan reads the latest 10-Q / 10-K
