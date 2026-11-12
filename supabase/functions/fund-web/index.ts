@@ -231,6 +231,18 @@ Deno.serve(async req => {
     const c = req.headers.get("x-outerhaven-cron");
     if (c) {
       if (c !== await secret("FUND_CRON_SECRET")) return json({ ok: false, error: "bad cron secret" }, 401);
+      // One company on demand with the cron key (spot checks from SQL): {action:'sponsor', key} / {action:'company', kind, id}.
+      if (body.action === "sponsor" || body.action === "company") {
+        const key = await secret("SERPER_API_KEY");
+        if (!key) return json({ ok: false, error: "no Serper key" });
+        if (body.action === "sponsor") {
+          const row = (await sb.from("bdc_signals").select("id,company_key,company_name,owner").eq("company_key", body.key).maybeSingle()).data;
+          return json({ ok: true, person: row?.owner ? await checkSponsor(row, key) : null });
+        }
+        const kind = body.kind === "bdc" ? "bdc" : "credit";
+        const row = (await sb.from(kind === "credit" ? "credit_signals" : "bdc_signals").select("*").eq("id", body.id).maybeSingle()).data;
+        return json({ ok: true, web: row ? await checkCompany(kind, row, key) : null });
+      }
       return json({ ok: true, ...(await cron()) });
     }
     const user = await admin(req);
