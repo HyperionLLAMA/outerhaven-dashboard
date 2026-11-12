@@ -147,7 +147,9 @@ export function ownerFrom(results, company, lenders = []) {
 // (fund-web company.js officersIn). Appointees are added (or an existing person takes the role, e.g. CEO as interim CFO);
 // people who left are kept but marked, so they drop to the bottom and never go into a batch. meta = { src: '8k'|'news', date, url }.
 export function applyChanges(people, changes, meta) {
-  const out = (people || []).map(p => ({ ...p })), find = n => out.find(p => nk(p.name) === nk(n));
+  // Same person when first and last names match: "Paul Lalljie" (8-K) = "Paul S. Lalljie" (10-Q signature).
+  const fl = n => { const w = String(n || '').toLowerCase().replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(x => x.length > 1); return w.length ? `${w[0]} ${w[w.length - 1]}` : ''; };
+  const out = (people || []).map(p => ({ ...p })), find = n => out.find(p => fl(p.name) === fl(n));
   for (const c of changes || []) {
     if (!c?.name) continue;
     const d = c.date || meta.date || null, url = c.url || meta.url || null, p = find(c.name);

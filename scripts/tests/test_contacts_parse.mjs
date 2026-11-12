@@ -113,3 +113,10 @@ console.log('ownership: ok');
   assert.equal(elsewhereFrom([{ ...r[0], title: 'Raymond Frech - CFO at Acme Widgets | LinkedIn' }], 'Raymond Frech', 'Acme Widgets, Inc.'), null);
   console.log('job changes ok');
 }
+{
+  const { applyChanges } = await import('../../supabase/functions/signal-contacts/parse.js');
+  // Powerfleet (13 Nov 2026 live run): the 8-K says "Paul Lalljie", the 10-Q is signed "Paul S. Lalljie": one person
+  const p = applyChanges([{ name: 'Paul S. Lalljie', role: 'cfo', source: 'sec' }], [{ name: 'Paul Lalljie', role: 'cfo', event: 'appointed' }], { src: '8k', date: '2026-08-11' });
+  assert.equal(p.length, 1); assert.ok(p[0].appointed);
+  console.log('middle initials ok');
+}
