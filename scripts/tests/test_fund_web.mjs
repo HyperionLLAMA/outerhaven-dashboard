@@ -62,3 +62,15 @@ assert.equal(w.facts, 2, 'Zeta sentence ignored (no manager name)');
 w = readResults(s, [scanPage(s, { url: 'https://paywalled.example.com/y', title: 'Acme closes', text: 'Jun 2, 2025 ... Acme Ventures closed Acme Ventures Fund I with $42 million in commitments ...' })]);
 assert.equal(w.final.amount, 42e6);
 console.log('fund web ok');
+
+// 13 Nov 2026 first live run: Kirkland AUM read as $71.75M (loan originations), New Protein first close as $75M (its target)
+{
+  const r = await import('../../supabase/functions/fund-web/read.js');
+  const AUM = /assets under management|\baum\b|in assets|manages/i, CLOSE = /clos(?:e|ed|ing)|raised|oversubscribed|commitments/i;
+  assert.equal(r.amountNear('With $40.61 million in total assets under management and $71.75 million in total loan originations', AUM), 40.61e6);
+  assert.equal(r.amountNear('closed Fund II at $50M, bringing AUM to $120M', AUM), 120e6);
+  assert.equal(r.amountNear('closed Fund II at $50M, bringing AUM to $120M', CLOSE), 50e6);
+  assert.equal(r.amountNear('Big Idea Ventures Has First Close Toward $75M Target for New Protein Fund II', CLOSE), null);
+  assert.equal(r.amountNear('held a first close of $30M toward its $75 million target', CLOSE), 30e6);
+  console.log('amount fixes ok');
+}

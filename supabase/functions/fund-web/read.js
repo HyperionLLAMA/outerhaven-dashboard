@@ -57,7 +57,10 @@ function amounts(text) {
   while ((m = re.exec(String(text || '')))) {
     const n = Number(m[1].replace(/,/g, '')), u = (m[2] || '').toLowerCase();
     const v = /^(billion|bn|b)$/.test(u) ? n * 1e9 : /^(million|mm|mn|m)$/.test(u) ? n * 1e6 : /^(thousand|k)$/.test(u) ? n * 1e3 : n;
-    if (Number.isFinite(v) && v >= 1e5) out.push({ v, at: m.index });
+    const t = String(text), end = re.lastIndex;
+    // "toward a $75M target" / "target of $75M" is the goal, not money raised
+    const goal = /^\s*(?:fund\s+)?(?:target|goal|hard cap)/i.test(t.slice(end, end + 25)) || /(?:target|goal|hard cap)\s+(?:of|size of)?\s*$/i.test(t.slice(Math.max(0, m.index - 20), m.index));
+    if (Number.isFinite(v) && v >= 1e5 && !goal) out.push({ v, at: m.index, end });
   }
   return out;
 }
@@ -68,7 +71,10 @@ export function amountNear(text, cue) {
   if (!a.length) return null;
   const m = String(text || '').match(cue);
   if (!m) return a[0].v;
-  const after = a.find(x => x.at >= m.index), before = a.filter(x => x.at < m.index).pop();
+  const after = a.find(x => x.at >= m.index), before = a.filter(x => x.at < m.index).pop(), t = String(text);
+  // "AUM to $120M" / "AUM of $120M" belongs after; "$40M in total assets under management" belongs before.
+  if (after && /^\s*(?:of|to|at|is|was|now|stands at|reach(?:ed|ing)?|total(?:s|ing)?|:|-)?\s*(?:approximately|about|roughly|over|more than|nearly|some)?\s*(?:US)?$/i.test(t.slice(m.index + m[0].length, after.at))) return after.v;
+  if (before && /^\s*(?:in|of)\s+(?:total\s+|combined\s+|regulatory\s+)?$/i.test(t.slice(before.end, m.index))) return before.v;
   return (after && (!before || after.at - m.index <= 120) ? after : before || after).v;
 }
 export const moneyIn = t => amountNear(t, /$^/);
@@ -155,5 +161,5 @@ export function scanPage(s, page) {
     if (ev) events.push({ fund_name: q, event: ev[1], quote: q });
   }
   const aumQ = all.filter(q => AUM.test(q) && amounts(q).length).sort((a, b) => norm(b).includes(kw) - norm(a).includes(kw))[0];
-  return { url: page.url, title: page.title || '', publishedDate: page.date || null, text: all.join('\n'), summary: JSON.stringify({ about_manager: true, events, aum_quote: aumQ || '' }) };
+  return { url: page.url, title: page.title || '', publishedDate: dateOf(page.date) || null, text: all.join('\n'), summary: JSON.stringify({ about_manager: true, events, aum_quote: aumQ || '' }) };
 }
