@@ -13,7 +13,7 @@ Read this first in any session on this repo. It is the hand-off from the session
   `.claude`, `routines`, `supabase`, `sheets` off the site. Pushing to `main` deploys.
 
 ## Access (already set up; don't ask the user to redo it)
-- **GitHub**: HyperionLLAMA/outerhaven-dashboard (Tengku's fork since 7 Nov 2026; push ONLY here, never to chasehamby123). Push to `main` works from the session.
+- **GitHub**: HyperionLLAMA/outerhaven-dashboard2 (Tengku's fork since 7 Nov 2026; push ONLY here, never to chasehamby123). Push to `main` works from the session.
 - **Supabase**: project `nfcysxqdwpdhrdpgxrlo`, via the Supabase connector (`execute_sql`, `apply_migration`,
   `deploy_edge_function`). Publishable key is in `hq/core.js`.
 - **Notion, Google Drive**: connectors on Tengku's account.

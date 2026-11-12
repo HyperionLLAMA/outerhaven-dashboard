@@ -18,7 +18,7 @@ const money = n => n == null ? '—' : Math.abs(n) >= 1e9 ? '$' + +(n / 1e9).toF
 const day = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const toneOf = t => t === 'good' ? 'good' : t === 'cut' ? 'bad' : t === 'maybe' ? 'warn' : '';
 const bucket = s => s.status === 'added' ? 'added' : s.status === 'dismissed' ? 'dismissed' : s.verdict;
-const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard/actions/workflows/fund-signals.yml';
+const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard2/actions/workflows/fund-signals.yml';
 const cfoSearch = s => `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent('CFO ' + s.company_name.replace(/,?\s+(inc|corp|corporation|co|ltd|llc|plc|holdings)\.?$/i, ''))}`;
 
 async function load() {

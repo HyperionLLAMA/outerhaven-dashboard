@@ -13,7 +13,7 @@ const money = n => n == null ? '—' : n >= 1e9 ? '$' + +(n / 1e9).toFixed(1) + 
 const mon = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
 const toneOf = t => t === 'good' ? 'good' : t === 'cut' ? 'bad' : t === 'maybe' ? 'warn' : '';
 const bucket = s => s.status === 'added' ? 'added' : s.status === 'dismissed' ? 'dismissed' : s.verdict;
-const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard/actions/workflows/fund-signals.yml';
+const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard2/actions/workflows/fund-signals.yml';
 const monthsTo = d => d ? Math.round((Date.parse(d) - Date.now()) / (30.44 * 864e5)) : null;
 const whenLabel = d => { const days = Math.round((Date.parse(d) - Date.now()) / 864e5), mo = Math.round(days / 30.44); return days < 0 ? (days > -45 ? `matured ${-days} days ago` : `matured ${-mo} months ago`) : days < 45 ? `in ${days} days` : `${mo} months`; };
 const shortName = n => String(n || '').replace(/,?\s+(inc|corp|corporation|co|company|ltd|limited|llc|l\.l\.c\.|lp|l\.p\.|llp|pc)\.?$/i, '').trim();

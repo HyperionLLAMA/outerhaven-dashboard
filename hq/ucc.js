@@ -13,7 +13,7 @@ const money = n => n == null ? '—' : n >= 1e9 ? '$' + +(n / 1e9).toFixed(1) + 
 const mon = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
 const toneOf = t => t === 'good' ? 'good' : t === 'cut' ? 'bad' : t === 'maybe' ? 'warn' : '';
 const bucket = s => s.status === 'added' ? 'added' : s.status === 'dismissed' ? 'dismissed' : s.verdict;
-const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard/actions/workflows/fund-signals.yml';
+const GH_RUN = 'https://github.com/HyperionLLAMA/outerhaven-dashboard2/actions/workflows/fund-signals.yml';
 const SECTOR = { 11: 'Agriculture', 21: 'Mining, oil & gas', 22: 'Utilities', 23: 'Construction', 31: 'Manufacturing', 32: 'Manufacturing', 33: 'Manufacturing', 42: 'Wholesale', 44: 'Retail', 45: 'Retail', 48: 'Transport & logistics', 49: 'Transport & logistics', 51: 'Media & telecom', 53: 'Real estate', 54: 'Professional services', 55: 'Holding company', 56: 'Business services', 61: 'Education', 62: 'Healthcare', 71: 'Leisure', 72: 'Hospitality & food', 81: 'Other services' };
 const sector = s => SECTOR[String(s.naics || '').slice(0, 2)] || '';
 const CLASS = { mca: 'Merchant cash advance', rep: 'Undisclosed lender (via filing agent)', irs: 'IRS tax lien', state_tax: 'State tax / labor lien', judgment: 'Judgment lien', factoring: 'Factoring', fintech: 'Platform loan', sba: 'SBA (EIDL)', bank: 'Bank', agent: 'Agent (syndicated / private credit)', abl: 'Asset-based / commercial finance', statutory: 'Statutory lien' };
