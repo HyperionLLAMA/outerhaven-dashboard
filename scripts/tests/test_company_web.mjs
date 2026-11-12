@@ -35,3 +35,7 @@ console.log('company web ok');
 assert.equal(brand('ADS Group Opco, LLC'), 'ADS Group');
 assert.deepEqual(scanCompany('Acme, Inc.', { url: 'https://x.com', text: 'Acmeco Partners entered into a new credit facility with its bank.' }), []);
 console.log('short names ok');
+// Same run: class-action notices and stock-tip headlines are not a sale.
+assert.deepEqual(scanCompany('Microvast Holdings, Inc.', { url: 'https://x.com', text: 'If you are an investor who purchased or otherwise acquired Microvast securities during the Class Period, you have until September 21, 2026.' }), []);
+assert.deepEqual(scanCompany('Postal Realty Trust, Inc.', { url: 'https://x.com', text: '5 Reasons to Buy Postal Realty Trust Stock Right Now.' }), []);
+console.log('false sales ok');

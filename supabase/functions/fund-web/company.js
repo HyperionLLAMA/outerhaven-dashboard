@@ -28,7 +28,8 @@ const EV = [
   ['adviser', /\b(?:retained|engaged|hired|appointed|selected|tapped)\b[^.]{0,80}\b(?:as (?:its )?(?:exclusive )?(?:financial|investment banking|restructuring|capital markets|debt) advis[eo]r|to (?:advise|explore|evaluate|run|lead))|\bstrategic alternatives\b|\brestructuring advis[eo]r/i],
 ];
 // Being sold: the company is the object ("acquired by", "agreed to acquire <name>", "acquisition of <name>"), never the buyer.
-const saleRe = b => new RegExp(`${esc(b)}[^.]{0,60}\\b(?:(?:has been|was|to be|will be|is being|agreed to be|signed a definitive agreement to be) acquired|enter(?:ed|s) into a definitive (?:merger )?agreement to be acquired|to merge with)|\\b(?:acquir(?:e|es|ed|ing)|acquisition of|to buy|completed the acquisition of)\\s+(?:all (?:of the )?(?:outstanding )?(?:shares of )?)?${esc(b)}`, 'i');
+// Strong verbs only: "acquired Microvast securities" (a class-action notice) and "reasons to buy X stock" are not a sale.
+const saleRe = b => new RegExp(`${esc(b)}[^.]{0,60}\\b(?:(?:has been|was|to be|will be|is being|agreed to be|signed a definitive agreement to be) acquired|enter(?:ed|s) into a definitive (?:merger )?agreement to be acquired|to merge with)|\\b(?:(?:agreed|agreement|deal|offer) to acquire|completed (?:its |the )?acquisition of|(?:announced|closed|completes|completed) (?:its |the )?(?:pending )?(?:sale|purchase|acquisition) of)\\s+${esc(b)}(?!\\s+(?:securities|shares|stock|common|notes))`, 'i');
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Serper dates: "Mar 4, 2026", "2026-03-04", "3 weeks ago". -> YYYY-MM-DD or null.
