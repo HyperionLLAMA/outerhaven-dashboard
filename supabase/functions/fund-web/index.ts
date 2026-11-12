@@ -8,7 +8,7 @@
 //   day; targets re-checked after RECHECK_DAYS). Admin (user JWT): action 'check' {id} = Check web now.
 // Keys: SERPER_API_KEY and/or EXA_API_KEY (pasted in HQ → Fund signals → Setup, write-only). No key = nothing runs.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { companyQueries, readCompany, brand, has, norm } from "./company.js";
+import { companyQueries, readCompany, brand, has, norm, officerQuery, officersFromPages, sponsorQuery, sponsorsFromPages } from "./company.js";
 import { queriesFor, summaryQuery, readResults, SCHEMA, EXCLUDE, serperQueries, scanPage, htmlText, cleanName } from "./read.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -24,7 +24,7 @@ const SERPER_PRICE = 0.001; // per search ($50 for 50,000 credits; cheaper on bi
 const EST_SERPER = 3 * SERPER_PRICE;
 const PAGES = 4;
 // Credit / BDC targets (company.js): 2 searches each, past year only. Separate daily cap, same monthly budget.
-const CO_PER_RUN = 4, CO_DAILY_CAP = 60, CO_RECHECK_DAYS = 30, EST_CO = 2 * SERPER_PRICE;           // pages fetched per fund (those naming the manager, snippet hits first)
+const CO_PER_RUN = 4, CO_DAILY_CAP = 60, CO_RECHECK_DAYS = 30, EST_CO = 3 * SERPER_PRICE;           // pages fetched per fund (those naming the manager, snippet hits first)
 
 // Monthly budget (growth_settings.fund_web_budget, default $10, set in Fund signals → Setup), spread evenly over the days
 // left so it doesn't run dry in the first week. Spend = Exa's own costDollars, logged per fund in fund_web_runs.
@@ -129,24 +129,53 @@ async function checkFund(s: any, keys: { serper: string; exa: string }, allowExa
 // One Credit or BDC company: Google the past year, read the pages naming it, store web, mark stale (rules_version 0) so its
 // own cron re-judges it (fund-signals cron for credit, signal-contacts retryStale for BDC).
 async function checkCompany(kind: "credit" | "bdc", row: any, key: string) {
-  const b = norm(brand(row.company_name)), qs = companyQueries(row.company_name);
-  const hits = (await Promise.all(qs.map(q => serper(key, q, "qdr:y")))).flat();
-  const seen = new Set<string>(), cands: any[] = [];
-  for (const h of hits) {
-    if (!h.link || seen.has(h.link) || EXCLUDE.includes(hostOf(h.link))) continue;
-    seen.add(h.link);
-    if (has(`${h.title} ${h.snippet}`, b)) cands.push(h);
-  }
-  const pages = await Promise.all(cands.slice(0, PAGES).map(async h => ({ url: h.link, date: h.date, text: (await page(h.link)) || `${h.title}. ${h.snippet || ""}` })));
-  // Snippets of the pages we didn't fetch still count (Google's own text, same-sentence rule applies).
-  for (const h of cands.slice(PAGES, 12)) pages.push({ url: h.link, date: h.date, text: `${h.title}. ${h.snippet || ""}` });
-  const cost = qs.length * SERPER_PRICE, web = { ...readCompany(row.company_name, pages), via: "serper", cost };
+  const b = norm(brand(row.company_name)), qs = companyQueries(row.company_name), oq = officerQuery(row.company_name);
+  const [news, offs] = await Promise.all([Promise.all(qs.map(q => serper(key, q, "qdr:y"))).then(x => x.flat()), serper(key, oq, "qdr:y")]);
+  const pick = (hits: any[], max: number) => {
+    const seen = new Set<string>(), cands: any[] = [];
+    for (const h of hits) {
+      if (!h.link || seen.has(h.link) || EXCLUDE.includes(hostOf(h.link))) continue;
+      seen.add(h.link);
+      if (has(`${h.title} ${h.snippet}`, b)) cands.push(h);
+    }
+    return cands.slice(0, max);
+  };
+  const fetchAll = (cands: any[], n: number) => Promise.all(cands.map(async (h, i) => ({ url: h.link, title: h.title, date: h.date, text: (i < n ? await page(h.link) : null) || `${h.title}. ${h.snippet || ""}` })));
+  // Pages beyond the first PAGES count as Google's snippet only (same-sentence rule still applies).
+  const [pages, opages] = await Promise.all([fetchAll(pick(news, 12), PAGES), fetchAll(pick(offs, 8), 3)]);
+  // Who holds the CEO / CFO job now (news): appointments and departures, newest first.
+  const officers = officersFromPages(row.company_name, opages).slice(0, 6);
+  const cost = (qs.length + 1) * SERPER_PRICE, web = { ...readCompany(row.company_name, pages), officers, via: "serper", cost };
   const table = kind === "credit" ? "credit_signals" : "bdc_signals";
   const up = await sb.from(table).update({ web, web_checked_at: new Date().toISOString(), rules_version: 0 }).eq("id", row.id);
   if (up.error) throw new Error(up.error.message);
-  await sb.from("fund_web_runs").insert({ kind, fund_key: `${kind}:${row.cik || row.company_key}`, signal_id: row.id, pages: web.pages, facts: web.facts, cost_usd: cost });
+  await sb.from("fund_web_runs").insert({ kind, fund_key: `${kind}:${row.cik || row.company_key}`, signal_id: row.id, pages: web.pages, facts: web.facts + officers.length, cost_usd: cost });
+  // New / interim CEO or CFO goes onto the contact card (signal-contacts finds their LinkedIn on its next run); people who left are marked.
+  const k = officers.length ? await secret("FUND_INGEST_SECRET") : "";
+  if (k) await fetch(`${SUPABASE_URL}/functions/v1/signal-contacts`, { method: "POST", headers: { "content-type": "application/json", "x-fund-ingest": k },
+    body: JSON.stringify({ kind: "changes", type: kind, key: kind === "credit" ? String(Number(row.cik)) : row.company_key, company_name: row.company_name, changes: officers }) }).catch(() => null);
   return web;
 }
+// PE-owned BDC borrower: find the owner's partner on the deal (press releases quote them), then their LinkedIn. 2 searches.
+async function checkSponsor(row: any, key: string) {
+  const owner = String(row.owner || ""), ok = norm(owner.replace(/,?\s+(LLC|L\.?P\.?|Inc\.?)$/i, ""));
+  const hits = (await serper(key, sponsorQuery(owner, row.company_name))).filter((h: any) => h.link && has(`${h.title} ${h.snippet}`, ok) && !EXCLUDE.includes(hostOf(h.link)));
+  const pages = await Promise.all(hits.slice(0, 6).map(async (h: any, i: number) => ({ url: h.link, title: h.title, text: (i < 3 ? await page(h.link) : null) || `${h.title}. ${h.snippet || ""}` })));
+  const best = sponsorsFromPages(row.company_name, owner, pages)[0] || null;
+  let cost = SERPER_PRICE, person: any = null;
+  if (best) {
+    const li = (await serper(key, `"${best.name}" "${owner}" site:linkedin.com/in`)).find((h: any) => /linkedin\.com\/in\//.test(h.link || "") && norm(h.title).startsWith(norm(best.name).split(" ")[0]) && norm(h.title).includes(norm(best.name).split(" ").pop()!));
+    cost += SERPER_PRICE;
+    person = { name: best.name, role: "sponsor", title: best.title, employer: owner, linkedin: li ? String(li.link).split("?")[0] : null, source: "news", source_url: best.url, on_deal: best.on_deal, quote: best.quote };
+  }
+  await sb.from("bdc_signals").update({ sponsor_checked_at: new Date().toISOString() }).eq("id", row.id);
+  await sb.from("fund_web_runs").insert({ kind: "bdc", fund_key: `sponsor:${row.company_key}`, signal_id: row.id, pages: pages.length, facts: person ? 1 : 0, cost_usd: cost });
+  const k = person ? await secret("FUND_INGEST_SECRET") : "";
+  if (k) await fetch(`${SUPABASE_URL}/functions/v1/signal-contacts`, { method: "POST", headers: { "content-type": "application/json", "x-fund-ingest": k },
+    body: JSON.stringify({ kind: "sponsor", type: "bdc", key: row.company_key, company_name: row.company_name, person }) }).catch(() => null);
+  return person;
+}
+
 async function companies(key: string, budgetLeft: number) {
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const done = (await sb.from("fund_web_runs").select("id", { count: "exact", head: true }).neq("kind", "fund").gte("created_at", today.toISOString())).count || 0;
@@ -158,7 +187,11 @@ async function companies(key: string, budgetLeft: number) {
   const cr = ((await sb.from("credit_signals").select("*").eq("verdict", "target").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["credit", r]);
   // Alternate BDC and credit so neither list waits for the other to finish.
   const picked = (Array.from({ length: n }, (_, i) => [bdc[i], cr[i]]).flat().filter(Boolean) as [("credit" | "bdc"), any][]).slice(0, n);
-  return { checked: await Promise.all(picked.map(async ([k, r]) => {
+  // Plus up to 2 PE-owned refi borrowers a run: find the owner's deal partner.
+  const owned = (await sb.from("bdc_signals").select("id,company_key,company_name,owner").eq("lane", "refi").not("owner", "is", null).is("sponsor_checked_at", null)
+    .neq("verdict", "cut").order("score", { ascending: false }).limit(2)).data || [];
+  const sponsors = await Promise.all(owned.map(async (r: any) => { try { const p = await checkSponsor(r, key); return { company: r.company_name, owner: r.owner, partner: p?.name || null, linkedin: !!p?.linkedin }; } catch (e) { return { company: r.company_name, error: String(e).slice(0, 120) }; } }));
+  return { sponsors, checked: await Promise.all(picked.map(async ([k, r]) => {
     try { const w = await checkCompany(k, r, key); return { kind: k, company: r.company_name, refi: !!w.refi, adviser: !!w.adviser, sale: !!w.sale }; }
     catch (e) { return { kind: k, company: r.company_name, error: String(e instanceof Error ? e.message : e).slice(0, 160) }; }
   })) };

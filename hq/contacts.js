@@ -23,10 +23,12 @@ const get = (kind, key) => cache[kind]?.get(String(key)) || null;
 export const contactOf = get;
 // New CFO (8-K Item 5.02 in the last 180 days, officers.py) on a credit target: a CFO who inherited debt coming due (29 Oct 2026).
 export const cfoChanged = key => (get('credit', key)?.officer_change?.roles || []).includes('cfo');
-const live = c => (c?.people || []).filter(p => p.status !== 'wrong');
-export const bestPerson = (kind, key) => live(get(kind, key))[0] || null;
+const live = c => (c?.people || []).filter(p => p.status !== 'wrong' && !p.left);
+// Never batch someone who left; the owner's deal partner is shown but outreach goes to the company's own CFO / CEO.
+export const bestPerson = (kind, key) => live(get(kind, key)).filter(p => p.role !== 'sponsor')[0] || null;
+const SRC = { '8k': '8-K', news: 'news', sec: 'SEC' };
 
-const ROLE = { cfo: 'CFO', ceo: 'CEO', other: 'Exec' };
+const ROLE = { cfo: 'CFO', ceo: 'CEO', sponsor: 'Owner', other: 'Exec' };
 function personHtml(kind, key, p, c) {
   const enc = encodeURIComponent(p.name);
   const src = p.source === 'sec' ? `<a class="ctSrc" href="${esc(p.source_url || '#')}" target="_blank" rel="noopener" title="Signed the ${esc(p.form || '10-K/10-Q')} certification filed ${esc(p.filed || '')}">SEC</a>` : '';
@@ -37,20 +39,25 @@ function personHtml(kind, key, p, c) {
     : `<span class="ctMiss">${c?.looked_up_at ? '✕ No LinkedIn found' : '… LinkedIn not searched yet'}</span>`;
   const check = p.status === 'confirmed' ? '<span class="ctOk" title="Confirmed by the team">✓ confirmed</span>'
     : p.source === 'sec' ? '' : `<button type="button" class="ctLink muted" data-ctmark="${enc}" data-st="confirmed" title="This is the right person">✓ Right</button><button type="button" class="ctLink muted" data-ctmark="${enc}" data-st="wrong" title="Wrong person or left the company">✕ Wrong</button>`;
-  return `<div class="ctPerson"><span class="ctRole">${ROLE[p.role] || 'Exec'}</span><b>${esc(p.name)}</b>${src}
+  // Who holds the job now: new / interim appointees (8-K or news), LinkedIn showing another employer, the owner's deal partner.
+  const isNew = p.appointed ? `<a class="ctSrc" href="${esc(p.appointed.url || '#')}" target="_blank" rel="noopener" title="Appointed ${esc(p.appointed.date || '')} (${esc(SRC[p.appointed.src] || p.appointed.src)})">${p.appointed.interim ? 'Interim' : 'New'} · ${esc(SRC[p.appointed.src] || '')} ${esc((p.appointed.date || '').slice(0, 7))}</a>` : '';
+  const away = p.li_elsewhere ? `<a class="ctWarn" href="${esc(p.li_elsewhere.linkedin)}" target="_blank" rel="noopener" title="Their LinkedIn shows another employer: they may have left">⚠ LinkedIn shows ${esc(p.li_elsewhere.employer)}</a>` : '';
+  const sponsor = p.role === 'sponsor' ? `<span class="ctSrc" title="${esc(p.quote || '')}">${esc(p.title || 'Partner')}, ${esc(p.employer || '')}${p.on_deal ? '' : ' (deal not named)'}</span>` : '';
+  return `<div class="ctPerson"><span class="ctRole">${ROLE[p.role] || 'Exec'}</span><b>${esc(p.name)}</b>${src}${isNew}${sponsor}${away}
     ${li}${email}${check}</div>`;
 }
 
 // The contact block for one card. key: credit = cik, bdc / ucc = company_key.
 export function contactHtml(kind, key, s) {
   if (!cache[kind]) return `<div class="ct" data-ctkey="${esc(key)}"><span class="ctNone">Loading contacts…</span></div>`;
-  const c = get(kind, key), people = live(c).slice(0, 2);
+  const c = get(kind, key), all = live(c), people = [...all.filter(p => p.role !== 'sponsor').slice(0, 2), ...all.filter(p => p.role === 'sponsor').slice(0, 1)];
+  const gone = (c?.people || []).filter(p => p.left).map(p => `<a class="ctWarn" href="${esc(p.left.url || '#')}" target="_blank" rel="noopener">✕ ${esc(p.name)} left${p.left.date ? ' ' + esc(p.left.date.slice(0, 7)) : ''} (${esc(SRC[p.left.src] || p.left.src || '')}): don't message</a>`).join('');
   const extra = [c?.phone ? `<a class="ctLink" href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '', c?.website ? `<a class="ctLink" href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.domain || 'Website')} ↗</a>` : ''].filter(Boolean).join('');
   const change = c?.officer_change ? `<a class="ctWarn" href="${esc(c.officer_change.url)}" target="_blank" rel="noopener">⚠ ${esc((c.officer_change.roles || []).map(r => r.toUpperCase()).join(' and ') || 'Officer')} change filed ${esc(c.officer_change.date)} (8-K): the names may be out of date</a>` : '';
   const action = (people.length && c?.looked_up_at ? '' : `<button type="button" class="ctLink muted" data-ctlookup="${esc(key)}">${c?.looked_up_at ? 'Search again' : people.length ? 'Find LinkedIn' : 'Find contacts'}</button>`)
     + `<button type="button" class="ctLink muted" data-ctother title="Type any name: finds and checks their work email">+ Email for someone else</button>`;
   const none = !people.length ? `<span class="ctNone">${esc(c?.lookup_note || (c?.looked_up_at ? 'No CFO / CEO found.' : 'No contact yet.'))}</span>` : '';
-  return `<div class="ct" data-ctkey="${esc(key)}">${people.map(p => personHtml(kind, key, p, c)).join('')}${none || extra || action || change ? `<div class="ctMeta">${none}${extra}${action}${change}</div>` : ''}</div>`;
+  return `<div class="ct" data-ctkey="${esc(key)}">${people.map(p => personHtml(kind, key, p, c)).join('')}${none || extra || action || change || gone ? `<div class="ctMeta">${none}${extra}${action}${change}${gone}</div>` : ''}</div>`;
 }
 
 async function call(body) {

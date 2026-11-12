@@ -92,8 +92,8 @@ export function mergePeople(old, found) {
     if (i < 0) out.push(p);
     else out[i] = { ...p, ...Object.fromEntries(Object.entries(out[i]).filter(([, v]) => v != null && v !== '')) };
   }
-  const rank = p => (p.status === 'wrong' ? 9 : 0) + (p.status === 'confirmed' ? -2 : 0) + (p.role === 'cfo' ? 0 : p.role === 'ceo' ? 1 : 2) + (p.source === 'sec' ? -0.5 : 0);
-  return out.sort((a, b) => rank(a) - rank(b)).slice(0, 6);
+  const rank = p => (p.left ? 8 : 0) + (p.status === 'wrong' ? 9 : 0) + (p.appointed ? -0.75 : 0) + (p.status === 'confirmed' ? -2 : 0) + (p.role === 'cfo' ? 0 : p.role === 'ceo' ? 1 : p.role === 'sponsor' ? 1.5 : 2) + (p.source === 'sec' ? -0.5 : 0);
+  return out.sort((a, b) => rank(a) - rank(b)).slice(0, 8);
 }
 
 // Who owns a private company, from web search results (12 Oct 2026, after Global Integrated Flooring ranked No. 1 as if founder-run
@@ -139,6 +139,38 @@ export function ownerFrom(results, company, lenders = []) {
           && !lenders.some(l => distinct(l)[0] === first)) return { owner, url: String(r.url || '') };
       }
     }
+  }
+  return null;
+}
+
+// Who holds the job now (13 Nov 2026): CEO / CFO changes from an 8-K Item 5.02 (officers.py change_people) or news
+// (fund-web company.js officersIn). Appointees are added (or an existing person takes the role, e.g. CEO as interim CFO);
+// people who left are kept but marked, so they drop to the bottom and never go into a batch. meta = { src: '8k'|'news', date, url }.
+export function applyChanges(people, changes, meta) {
+  const out = (people || []).map(p => ({ ...p })), find = n => out.find(p => nk(p.name) === nk(n));
+  for (const c of changes || []) {
+    if (!c?.name) continue;
+    const d = c.date || meta.date || null, url = c.url || meta.url || null, p = find(c.name);
+    if (c.event === 'left') { if (p && !p.left && !(p.appointed && (p.appointed.date || '') > (d || ''))) p.left = { date: d, src: meta.src, url, role: c.role }; continue; }
+    const title = `${c.interim ? 'Interim ' : ''}${c.role === 'cfo' ? 'CFO' : 'CEO'}`;
+    const appointed = { date: d, src: meta.src, url, interim: !!c.interim, role: c.role };
+    if (p) { if ((p.left?.date || '') > (d || '')) continue; delete p.left; p.appointed = appointed; if (c.role === 'cfo' || p.role !== 'cfo') { p.title = p.role && p.role !== c.role ? `${p.title || p.role.toUpperCase()} and ${title}` : title; p.role = c.role; } }
+    else out.push({ name: c.name, role: c.role, title, source: meta.src, source_url: url, appointed });
+  }
+  return mergePeople(out, []);
+}
+
+// A named officer's LinkedIn that now shows another employer: probably left (a hint, not proof; titles go stale too).
+export function elsewhereFrom(results, name, company) {
+  const want = String(name || '').toLowerCase().replace(/\b[a-z]\.\s*/g, '').split(/\s+/).filter(Boolean);
+  for (const r of results || []) {
+    const url = String(r?.url || '');
+    if (!/^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\//i.test(url)) continue;
+    const title = String(r.title || '').replace(/\s*\|\s*LinkedIn\s*$/i, '').trim(), parts = title.split(/\s+[-–—|]\s+/);
+    const got = (parts[0] || '').toLowerCase().replace(/,.*$/, '').split(/\s+/);
+    if (!want.length || got[0] !== want[0] || got[got.length - 1] !== want[want.length - 1]) continue;
+    const emp = employerOf(parts, String(r.description || '')).replace(/\s*(\.\.\.|…)$/, '').trim();
+    if (emp && !sameCompany(emp, company) && !/\b(former|ex-|previously)\b/i.test(title)) return { employer: emp.slice(0, 60), linkedin: url.split('?')[0] };
   }
   return null;
 }

@@ -4,3 +4,5 @@ alter table public.credit_signals add column if not exists web jsonb, add column
 alter table public.bdc_signals add column if not exists web jsonb, add column if not exists web_checked_at timestamptz;
 -- fund_web_runs logs both: kind 'fund' | 'credit' | 'bdc' (separate daily caps, one monthly budget).
 alter table public.fund_web_runs add column if not exists kind text not null default 'fund';
+-- Same day: PE owner's deal partner lookup (fund-web checkSponsor) marks BDC rows it has searched.
+alter table public.bdc_signals add column if not exists sponsor_checked_at timestamptz;

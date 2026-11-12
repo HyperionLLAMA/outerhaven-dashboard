@@ -94,3 +94,22 @@ assert.equal(ownerFrom([{ title: 'x', description: 'QED was acquired by ComplyAd
 assert.equal(ownerFrom([{ title: 'Skylark Private Equity Partners and WhiteHorse Capital invests in Claridge Products', description: '' }], 'Claridge Products and Equipment, LLC', ['WHITEHORSE FINANCE, INC.'])?.owner, 'Skylark Private Equity Partners');
 assert.equal(ownerFrom([{ title: 'Claridge Products Acquired by Skylark Private Equity', description: '' }], 'Claridge Products and Equipment, LLC')?.owner, 'Skylark Private Equity');
 console.log('ownership: ok');
+
+// 13 Nov 2026: who holds the job now
+{
+  const { applyChanges, elsewhereFrom } = await import('../../supabase/functions/signal-contacts/parse.js');
+  const sec = [{ name: 'Raymond Frech', role: 'cfo', source: 'sec' }, { name: 'Dale Strang', role: 'ceo', source: 'sec' }];
+  let p = applyChanges(sec, [{ name: 'Alexis N. Tirrito', role: 'cfo', event: 'appointed', interim: true }, { name: 'Raymond Frech', role: 'cfo', event: 'left' }], { src: '8k', date: '2026-08-04', url: 'u' });
+  assert.equal(p[0].name, 'Alexis N. Tirrito'); assert.equal(p[0].title, 'Interim CFO');
+  assert.ok(p.find(x => x.name === 'Raymond Frech').left); assert.equal(p[p.length - 1].name, 'Raymond Frech');
+  // CEO covering as interim CFO: same person, takes the CFO role
+  p = applyChanges(sec, [{ name: 'Dale Strang', role: 'cfo', event: 'appointed', interim: true }, { name: 'Raymond Frech', role: 'cfo', event: 'left' }], { src: 'news', date: '2026-09-01' });
+  assert.equal(p[0].name, 'Dale Strang'); assert.equal(p[0].role, 'cfo'); assert.match(p[0].title, /Interim CFO/);
+  // An older departure never overrides a newer appointment of the same person
+  p = applyChanges([{ name: 'Jane Doe', role: 'cfo', appointed: { date: '2026-10-01' } }], [{ name: 'Jane Doe', role: 'cfo', event: 'left', date: '2025-01-01' }], { src: 'news' });
+  assert.ok(!p[0].left);
+  const r = [{ url: 'https://www.linkedin.com/in/rfrech', title: 'Raymond Frech - CFO at Globex Corp | LinkedIn', description: '' }];
+  assert.deepEqual(elsewhereFrom(r, 'Raymond Frech', 'Acme Widgets, Inc.'), { employer: 'Globex Corp', linkedin: 'https://www.linkedin.com/in/rfrech' });
+  assert.equal(elsewhereFrom([{ ...r[0], title: 'Raymond Frech - CFO at Acme Widgets | LinkedIn' }], 'Raymond Frech', 'Acme Widgets, Inc.'), null);
+  console.log('job changes ok');
+}

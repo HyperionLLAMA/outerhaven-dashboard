@@ -8,7 +8,7 @@
 //   'mark' {kind, key, name, status: 'confirmed'|'wrong'|null}.
 // Keys (pasted in HQ, write-only): BRAVE_SEARCH_KEY (LinkedIn + website), APIFY_TOKEN + HUNTER_API_KEY (work email). Missing key = that step is skipped.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { brand, searchName, profileFrom, websiteFrom, mergePeople, ownerFrom } from "./parse.js";
+import { brand, searchName, profileFrom, websiteFrom, mergePeople, ownerFrom, applyChanges, elsewhereFrom } from "./parse.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
@@ -104,13 +104,17 @@ async function lookup(kind: string, key: string, name?: string) {
   if (!company) throw new Error("Company not found");
   if (!bk) { await save(kind, key, { company_name: company, lookup_note: "No Brave Search key yet (HQ → Contacts setup)." }); return { ok: false, note: "no key" }; }
   // A new search replaces earlier unconfirmed search finds; SEC names and anyone the team marked stay.
-  const b = brand(company), people = (row?.people || []).filter((p: any) => p.source === "sec" || p.status);
+  const NAMED = ["sec", "8k", "news", "manual"];
+  const b = brand(company), people = (row?.people || []).filter((p: any) => NAMED.includes(p.source) || p.status);
   const found: any[] = [];
-  // Named officers (SEC): search each by name for their LinkedIn. Otherwise search the company for finance / top roles.
-  const named = people.filter((p: any) => p.source === "sec" && !p.linkedin).slice(0, 2);
+  // Named officers (SEC signers, 8-K / news appointees): search each by name for their LinkedIn. Otherwise search the company for roles.
+  // People marked as left are skipped. A profile under the name that now shows another employer = "LinkedIn shows <X>" (13 Nov 2026).
+  const named = people.filter((p: any) => NAMED.includes(p.source) && !p.linkedin && !p.left).slice(0, 3);
   for (const p of named) {
-    const hit = (await brave(`"${p.name}" "${b}" site:linkedin.com/in`, bk)).map(r => profileFrom(r, company, true)).find(x => x && x.name.split(" ").pop()!.toLowerCase() === String(p.name).split(" ").pop()!.toLowerCase());
-    if (hit) found.push({ ...p, linkedin: hit.linkedin });
+    const res = await brave(`"${p.name}" "${b}" site:linkedin.com/in`, bk);
+    const hit = res.map(r => profileFrom(r, company, true)).find(x => x && x.name.split(" ").pop()!.toLowerCase() === String(p.name).split(" ").pop()!.toLowerCase());
+    const away = hit ? null : elsewhereFrom(res, p.name, company);
+    found.push({ ...p, ...(hit ? { linkedin: hit.linkedin } : {}), ...(away ? { li_elsewhere: away } : {}), li_checked: new Date().toISOString() });
   }
   const alt = searchName(company), loose = alt && alt !== b.toLowerCase();
   if (!named.length) {
@@ -123,7 +127,7 @@ async function lookup(kind: string, key: string, name?: string) {
   }
   if (kind === "bdc") await checkOwner(key, company, bk);
   let site = row?.domain ? null : websiteFrom(await brave(`"${b}" official website`, bk), company);
-  const note = found.length ? null : named.length ? "SEC officers found, no LinkedIn match." : "No CFO / CEO profile found in search.";
+  const note = found.some(p => p.linkedin) ? null : named.length ? "Named officers found, no LinkedIn match." : "No CFO / CEO profile found in search.";
   await save(kind, key, { company_name: company, people: mergePeople(people, found.slice(0, 4)), ...(site ? { website: site.website, domain: site.domain } : {}), looked_up_at: new Date().toISOString(), lookup_note: note });
   return { ok: true, found: found.length, domain: site?.domain || row?.domain || null };
 }
@@ -199,7 +203,11 @@ async function cron() {
     lists[kind] = (rows as any[]).filter(r => kind === "bdc" ? !r.owner_checked_at : !done.has(`${kind}:${r[KEYCOL[kind]]}`))
       .map(r => [kind, String(r[KEYCOL[kind]]), r.company_name] as [string, string, string]);
   }
-  const todo: [string, string, string][] = [];
+  // First: companies where a new CFO / CEO came in (8-K or news) and nobody searched their LinkedIn yet.
+  const fresh = ((await sb.from("signal_contacts").select("kind,key,company_name,people").in("kind", ["credit", "bdc"]).limit(3000)).data || [])
+    .filter((r: any) => (r.people || []).some((p: any) => ["8k", "news"].includes(p.source) && !p.linkedin && !p.li_checked && !p.left))
+    .map((r: any) => [r.kind, String(r.key), r.company_name] as [string, string, string]);
+  const todo: [string, string, string][] = [...fresh];
   for (let i = 0; i < Math.max(lists.bdc.length, lists.credit.length); i++) { if (lists.bdc[i]) todo.push(lists.bdc[i]); if (lists.credit[i]) todo.push(lists.credit[i]); }
   todo.push(...lists.ucc);
   let n = 0;
@@ -228,11 +236,28 @@ async function ingest(body: any) {
       const sec = (it.people || []).filter((p: any) => p?.name).map((p: any) => ({ ...p, source: "sec" }));
       // SEC names replace older SEC names (officers change); people found by search or marked by the team stay.
       const kept = (row?.people || []).filter((p: any) => p.source !== "sec" || p.status || sec.some((s: any) => s.name === p.name));
-      await save("credit", key, { company_name: it.company_name || row?.company_name || null, people: mergePeople(kept, sec), phone: it.phone || row?.phone || null,
+      const oc = it.officer_change, merged = mergePeople(kept, sec);
+      const people = oc?.people?.length ? applyChanges(merged, oc.people, { src: "8k", date: oc.date, url: oc.url }) : merged;
+      await save("credit", key, { company_name: it.company_name || row?.company_name || null, people, phone: it.phone || row?.phone || null,
         website: it.website || row?.website || null, domain: it.domain || row?.domain || null, officer_change: it.officer_change || null, sec_checked_at: new Date().toISOString() });
       n++;
     }
     return { stored: n };
+  }
+  // CEO / CFO changes found in news by fund-web (company.js officersIn): {type, key, company_name, changes[{name, role, event, interim, date, url}]}.
+  if (body.kind === "changes") {
+    const t = String(body.type || ""), k = String(body.key || "");
+    if (!TABLE[t] || !k) throw new Error("type and key needed");
+    const row = await getRow(t, k);
+    await save(t, k, { company_name: row?.company_name || body.company_name || null, people: applyChanges(row?.people || [], body.changes || [], { src: "news" }) });
+    return { stored: (body.changes || []).length };
+  }
+  // PE owner's deal partner for a BDC borrower (fund-web checkSponsor): {type, key, company_name, person}.
+  if (body.kind === "sponsor") {
+    const t = String(body.type || "bdc"), k = String(body.key || ""), row = await getRow(t, k);
+    if (!body.person?.name) return { stored: 0 };
+    await save(t, k, { company_name: row?.company_name || body.company_name || null, people: mergePeople(row?.people || [], [body.person]) });
+    return { stored: 1 };
   }
   // Same email check as the card's "Find email", for Claude's pre-send checks from SQL (7 Nov 2026; no admin login there).
   if (body.kind === "email") {

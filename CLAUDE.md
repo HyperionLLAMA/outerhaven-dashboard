@@ -270,6 +270,19 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   before it = info. CREDIT_RULES_VERSION 13, BDC_RULES_VERSION 7. 4 companies a run, 60 a day, re-checked after 30 days, same monthly budget
   (`fund_web_runs.kind` = fund | credit | bdc). Cards: "Check news" (fund-web action `check_company` {kind, id}). Migration
   `supabase/2026-11-13-company-web.sql`. Auto-send stays OFF (Tengku, 13 Nov): the batch click stays human.
+- **Who holds the job now + PE deal partners (13 Nov 2026, Tengku: the 10-Q signer is often gone, the CEO covers as interim CFO):**
+  (1) `officers.py` `change_people()` reads the 5.02 8-K for appointees (incl. interim, "CEO will also serve as interim PFO") and departures
+  ("following the resignation of X") → `officer_change.people`; signal-contacts `applyChanges()` (parse.js) adds appointees (source '8k',
+  `appointed` {date, src, interim}) or gives an existing person the role, and marks leavers `left` (kept, ranked last, never in a batch:
+  `bestPerson` skips them; card shows "✕ X left … don't message"). (2) fund-web company check adds a third Serper search (`officerQuery`)
+  → `officersIn()` / `officersFromPages()` (same patterns as Python; a job "of <another company>" or "formerly of" is skipped) →
+  `web.officers` + signal-contacts ingest kind `changes` (source 'news'). (3) signal-contacts lookup now searches LinkedIn for every named
+  person (sec / 8k / news / manual, not left; marks `li_checked`), and the cron does companies with a new unsearched appointee first; a
+  profile under the name at another employer = `li_elsewhere` ("⚠ LinkedIn shows X"). (4) PE-owned BDC refi borrowers: fund-web
+  `checkSponsor()` (2 a run, `bdc_signals.sponsor_checked_at`) searches "<owner>" "<company>", reads the partner quoted in the investment
+  release (`sponsorsIn()`: "said X, Partner at Owner" / "Owner Principal X"), then their LinkedIn → signal-contacts ingest `sponsor`
+  (role 'sponsor', shown as "Owner" on the card; not used by the batch, which only takes refi targets). Tests: test_company_web.mjs,
+  test_contacts_parse.mjs, test_officers.py.
 - **Will they pay? (13 Nov 2026):** `people.pay_score` 0–5 (+ `pay_note`, `pay_at`) set in the Pipeline update window: demonstrated
   willingness from a conversation, never predicted (0 unknown, 1 no / free intros only, 2 resists upfront fees, 3 open to a paid scope,
   4 discussing budget / terms / pilot, 5 signed and paid). It's the "who paid, who didn't, why" log per signal source.

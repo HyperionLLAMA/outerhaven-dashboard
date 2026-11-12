@@ -143,9 +143,12 @@ def officers(cik):
         doc = docs.get(a)
         if not doc:
             continue
-        roles = change_roles(text_of(sec_get(f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{a.replace('-', '')}/{doc}")))
+        text = text_of(sec_get(f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{a.replace('-', '')}/{doc}"))
+        roles = change_roles(text)
         if roles:
-            out["officer_change"] = {"date": c["date"], "url": c["url"], "roles": roles}
+            i = text.find("5.02")
+            # Who left and who replaced them (interim included): the 10-Q signer is often already gone.
+            out["officer_change"] = {"date": c["date"], "url": c["url"], "roles": roles, "people": change_people(text[i:i + 6000] if i >= 0 else text[:6000])}
             break
     return out
 
@@ -178,6 +181,43 @@ def change_roles(text):
         for role, rx in ROLE_WORDS:
             if rx.search(sentence) and role not in out:
                 out.append(role)
+    return out
+
+
+# Same patterns as officersIn() in supabase/functions/fund-web/company.js (news). Names need first + last.
+_NAME = r"(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})"
+_ROLE = r"(Chief Financial Officer|CFO|principal financial officer|Chief Executive Officer|CEO|principal executive officer)"
+_ART = r"(?:the Company's |the company's |its |our |the |their )?(?:new |permanent )?"
+_RX = {
+    "appoint": re.compile(rf"\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+{_NAME},?\s+(?:[^.]{{0,60}}?\s)?(?:as|to)\s+(?:the (?:role|position) of )?{_ART}(interim |acting )?{_ROLE}"),
+    "passive": re.compile(rf"{_NAME}(?:,[^,.]{{0,80}},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:as\s+|to\s+)?{_ART}(interim |acting )?{_ROLE}"),
+    "serve": re.compile(rf"{_NAME}(?:,[^.]{{0,80}}?,)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+{_ART}(interim |acting )?{_ROLE}"),
+    "left": re.compile(rf"{_NAME}(?:,[^.]{{0,80}}?,)?\s+(?:[^.]{{0,40}}?\s)?(?:resigned|resigns|has resigned|will resign|departed|departs|stepped down|steps down|will step down|retired|retires|will retire|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))[^.]{{0,60}}?{_ROLE}"),
+    "follow": re.compile(rf"(?:as|to)\s+{_ART}(?:interim |acting )?{_ROLE}[^.]{{0,40}}?\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?{_NAME}"),
+    "leftOf": re.compile(rf"(?:resignation|departure|retirement|termination) of {_NAME},?\s+(?:as\s+)?{_ART}{_ROLE}"),
+}
+_NOT_NAME = re.compile(r"\b(The|Board|Company|Officer|Chief|Directors?|Item|Inc|Corp|Committee|Financial|Executive|President|Holdings|Group|Capital|Partners|LLC|Our|Its|Following|Effective|On|In|As)\b")
+
+
+def change_people(text):
+    """CEO / CFO appointments (incl. interim) and departures named in 8-K Item 5.02 text: [{name, role, event, interim}]."""
+    t, out, seen = re.sub(r"\s+", " ", text or ""), [], set()
+    role_key = lambda r: "cfo" if re.search(r"financial|cfo", r, re.I) else "ceo"  # noqa: E731
+
+    def add(name, role, event, interim):
+        name = name.strip()
+        if _NOT_NAME.search(name) or len(name.split()) < 2 or (event, name.lower(), role) in seen:
+            return
+        seen.add((event, name.lower(), role))
+        out.append({"name": name, "role": role, "event": event, "interim": bool(interim)})
+    for k in ("appoint", "passive", "serve"):
+        for m in _RX[k].finditer(t):
+            add(m.group(1), role_key(m.group(3)), "appointed", m.group(2))
+    for k in ("left", "leftOf"):
+        for m in _RX[k].finditer(t):
+            add(m.group(1), role_key(m.group(2)), "left", False)
+    for m in _RX["follow"].finditer(t):
+        add(m.group(2), role_key(m.group(1)), "left", False)
     return out
 
 

@@ -39,3 +39,35 @@ console.log('short names ok');
 assert.deepEqual(scanCompany('Microvast Holdings, Inc.', { url: 'https://x.com', text: 'If you are an investor who purchased or otherwise acquired Microvast securities during the Class Period, you have until September 21, 2026.' }), []);
 assert.deepEqual(scanCompany('Postal Realty Trust, Inc.', { url: 'https://x.com', text: '5 Reasons to Buy Postal Realty Trust Stock Right Now.' }), []);
 console.log('false sales ok');
+{
+  const { officersIn, officersFromPages } = await import('../../supabase/functions/fund-web/company.js');
+  const o = t => officersIn(t).map(x => `${x.event}:${x.name}:${x.role}${x.interim ? ':interim' : ''}`);
+  assert.deepEqual(o('The Board appointed Alexis N. Tirrito as interim Chief Financial Officer following the resignation of Raymond Frech.'), ['appointed:Alexis N. Tirrito:cfo:interim', 'left:Raymond Frech:cfo']);
+  assert.deepEqual(o('On July 30, 2026, Ryan Zeek notified the Company of his resignation as Chief Financial Officer, effective August 29, 2026.'), ['left:Ryan Zeek:cfo']);
+  assert.deepEqual(o('Acme Widgets announced that Jane Doe has been appointed Chief Financial Officer, effective immediately.'), ['appointed:Jane Doe:cfo']);
+  assert.deepEqual(o('Dale Strang, the Company\'s Chief Executive Officer, will also serve as interim principal financial officer.'), ['appointed:Dale Strang:cfo:interim']);
+  assert.deepEqual(o('Acme Widgets names Maria Lopez CFO.'), []);   // no "as": too loose to trust
+  assert.deepEqual(o('Acme Widgets names Maria Lopez as CFO.'), ['appointed:Maria Lopez:cfo']);
+  assert.deepEqual(o('John Smith stepped down as Chief Executive Officer of Acme Widgets.'), ['left:John Smith:ceo']);
+  assert.deepEqual(o('The Board of Directors approved the bonus plan for the Chief Executive Officer.'), []);
+  const ps = officersFromPages('Acme Widgets, Inc.', [{ url: 'https://www.businesswire.com/a', title: 'Acme Widgets Appoints New CFO', date: 'Oct 2, 2026', text: 'The company appointed Jane Doe as Chief Financial Officer. Other news follows.' }]);
+  assert.equal(ps[0].name, 'Jane Doe'); assert.equal(ps[0].date, '2026-10-02');
+  console.log('officers ok');
+}
+{
+  const { officersFromPages } = await import('../../supabase/functions/fund-web/company.js');
+  const pg = text => [{ url: 'https://x.com/a', title: 'Exec moves', date: 'Oct 2, 2026', text }];
+  assert.equal(officersFromPages('Acme Widgets, Inc.', pg('Jane Doe, formerly of Acme Widgets, was named Chief Financial Officer of Globex.')).length, 0);
+  assert.equal(officersFromPages('Acme Widgets, Inc.', pg('Acme Widgets alum Jane Doe has been appointed Chief Financial Officer of Globex Corp.')).length, 0);
+  assert.equal(officersFromPages('Acme Widgets, Inc.', pg('Jane Doe has been appointed Chief Financial Officer of Acme Widgets.')).length, 1);
+  console.log('other-company jobs ok');
+}
+{
+  const { sponsorsIn, sponsorsFromPages } = await import('../../supabase/functions/fund-web/company.js');
+  assert.deepEqual(sponsorsIn('"We are excited to partner with management," said Jane Doe, a Partner at Audax Private Equity.', 'Audax Private Equity').map(x => x.name), ['Jane Doe']);
+  assert.deepEqual(sponsorsIn('ICV Partners Principal John Roe will join the board.', 'ICV Partners').map(x => x.title + ':' + x.name), ['Principal:John Roe']);
+  assert.deepEqual(sponsorsIn('The Board of Directors at ICV Partners approved it.', 'ICV Partners'), []);
+  const ps = sponsorsFromPages('Total Access Urgent Care', 'ICV Partners', [{ url: 'https://x.com', title: 'ICV Partners invests in Total Access Urgent Care', text: 'ICV Partners has made a majority investment. "Strong team," said Jane Doe, Managing Director at ICV Partners.' }]);
+  assert.equal(ps[0].name, 'Jane Doe'); assert.equal(ps[0].on_deal, true);
+  console.log('sponsors ok');
+}

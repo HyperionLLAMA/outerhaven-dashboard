@@ -37,3 +37,12 @@ assert change_roles("Item 5.02. Mr. Smith resigned from the Board of Directors. 
 assert change_roles("Item 5.02. The Compensation Committee approved the 2026 annual bonus plan for the Chief Executive Officer and Chief Financial Officer.") == []
 assert change_roles("Item 5.02. The Committee approved amendments to the retention agreements of the Company's named executive officers, including its Chief Executive Officer.") == []
 print("officers: all tests passed")
+
+# 13 Nov 2026: who replaced them (same cases as test_company_web.mjs)
+from officers import change_people  # noqa: E402
+cp = lambda t: [f"{x['event']}:{x['name']}:{x['role']}{':interim' if x['interim'] else ''}" for x in change_people(t)]  # noqa: E731
+assert cp("The Board appointed Alexis N. Tirrito as interim Chief Financial Officer following the resignation of Raymond Frech.") == ["appointed:Alexis N. Tirrito:cfo:interim", "left:Raymond Frech:cfo"]
+assert cp("On July 30, 2026, Ryan Zeek notified the Company of his resignation as Chief Financial Officer, effective August 29, 2026.") == ["left:Ryan Zeek:cfo"]
+assert cp("Dale Strang, the Company's Chief Executive Officer, will also serve as interim principal financial officer.") == ["appointed:Dale Strang:cfo:interim"]
+assert cp("The Compensation Committee approved the 2026 annual bonus plan for the Chief Executive Officer and Chief Financial Officer.") == []
+print("change_people ok")

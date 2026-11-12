@@ -64,3 +64,79 @@ export function readCompany(name, pages, at = new Date().toISOString(), now = ne
   return { at: at.slice(0, 10), pages: pages.length, facts: facts.length, refi: best('refinanced'), adviser: best('adviser'), sale: best('sale') };
 }
 export { htmlText };
+
+// ---- Who holds the job now (13 Nov 2026, Tengku: the 10-Q signer is often gone; the CEO often covers as interim CFO). Same
+// patterns as change_people() in scripts/officers.py (8-K Item 5.02 text); here they read news sentences. Names need first + last.
+const NAME = String.raw`(?:(?:Mr|Ms|Mrs|Dr)\.\s+)?(?!(?:The|On|In|As|At|By|Effective|Following|Our|Its|Their|Mr|Ms|Mrs|Dr|January|February|March|April|May|June|July|August|September|October|November|December)\b)([A-Z][a-zA-Z'’-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z'’-]+){1,2})`;
+const ROLE = String.raw`(Chief Financial Officer|CFO|principal financial officer|Chief Executive Officer|CEO|principal executive officer)`;
+const ART = String.raw`(?:the Company's |the company's |its |our |the |their )?(?:new |permanent )?`;
+const RX = {
+  appoint: new RegExp(String.raw`\b(?:appointed|appoints|named|names|promoted|promotes|hired|hires|elected)\s+${NAME},?\s+(?:[^.]{0,60}?\s)?(?:as|to)\s+(?:the (?:role|position) of )?${ART}(interim |acting )?${ROLE}`, 'g'),
+  passive: new RegExp(String.raw`${NAME}(?:,[^,.]{0,80},)?\s+(?:has been|was|will be|is|had been)\s+(?:appointed|named|promoted|elected)\s+(?:as\s+|to\s+)?${ART}(interim |acting )?${ROLE}`, 'g'),
+  serve: new RegExp(String.raw`${NAME}(?:,[^.]{0,80}?,)?\s+(?:will|to|shall)\s+(?:also\s+)?(?:serve|act|assume (?:the )?(?:duties|role)s?)\s+(?:as|of)\s+${ART}(interim |acting )?${ROLE}`, 'g'),
+  left: new RegExp(String.raw`${NAME}(?:,[^.]{0,80}?,)?\s+(?:[^.]{0,40}?\s)?(?:resigned|resigns|has resigned|will resign|departed|departs|stepped down|steps down|will step down|retired|retires|will retire|was terminated|notified the Company of (?:his|her|their) (?:decision to )?(?:resign|retire|resignation|retirement))[^.]{0,60}?${ROLE}`, 'g'),
+  // "appointed X as interim CFO following the resignation of Y": Y held the role X takes.
+  follow: new RegExp(String.raw`(?:as|to)\s+${ART}(?:interim |acting )?${ROLE}[^.]{0,40}?\b(?:following|after|succeeding|replacing|to succeed|to replace) (?:the (?:resignation|departure|retirement|termination) of )?${NAME}`, 'g'),
+  leftOf: new RegExp(String.raw`(?:resignation|departure|retirement|termination) of ${NAME},?\s+(?:as\s+)?${ART}${ROLE}`, 'g'),
+};
+const NOT_NAME = /\b(The|Board|Company|Officer|Chief|Directors?|Item|Inc|Corp|Committee|Financial|Executive|President|Holdings|Group|Capital|Partners|LLC|Our|Its|Following|Effective|On|In|As)\b/;
+const roleKey = r => /financial|cfo/i.test(r) ? 'cfo' : 'ceo';
+export function officersIn(text) {
+  const t = String(text || '').replace(/\s+/g, ' '), out = [], seen = new Set();
+  let at = 0;
+  const add = (name, role, event, interim, quote) => {
+    name = name.trim();
+    if (NOT_NAME.test(name) || name.split(' ').length < 2) return;
+    const k = `${event}|${name.toLowerCase()}|${role}`;
+    // "of Globex" right after the role = the job is at another company (kept for officersFromPages to check).
+    const of = (t.slice(at, at + 80).match(/^,?\s+(?:of|at)\s+([A-Z][\w&.'’-]*(?:\s+(?:[A-Z][\w&.'’-]*|&|and))*)/) || [])[1] || null;
+    if (!seen.has(k)) { seen.add(k); out.push({ name, role, event, interim: !!interim, quote: quote.slice(0, 300), of }); }
+  };
+  const each = (re, f) => { for (const m of t.matchAll(re)) { at = m.index + m[0].length; f(m); } };
+  for (const kind of ['appoint', 'passive', 'serve']) each(RX[kind], m => add(m[1], roleKey(m[3]), 'appointed', m[2], m[0]));
+  each(RX.left, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
+  each(RX.leftOf, m => add(m[1], roleKey(m[2]), 'left', false, m[0]));
+  each(RX.follow, m => add(m[2], roleKey(m[1]), 'left', false, m[0]));
+  return out;
+}
+export const officerQuery = name => `"${brand(name)}" ("chief financial officer" OR CFO OR "chief executive officer") appointed OR named OR interim OR resigned OR "steps down"`;
+// News sentences naming this company -> officer events, newest first per person.
+export function officersFromPages(name, pages, now = new Date()) {
+  const key = norm(brand(name)), out = [];
+  for (const p of pages) {
+    const date = dateOf(p.date, now), host = (() => { try { return new URL(p.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+    // The company named in the sentence, or the page is about it (title) and the sentence names the role.
+    const about = has(p.title || '', key);
+    for (const q of sentences(p.text)) if ((has(q, key) || about) && !/\b(?:formerly|previously|former \w+) (?:of|at|with)\b/i.test(q))
+      for (const o of officersIn(q)) if (!o.of || has(o.of, key)) { const { of, ...rest } = o; out.push({ ...rest, date, url: p.url, source: host }); }
+  }
+  return out.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ---- PE owner's deal partner (13 Nov 2026): a PE-owned BDC borrower's refinancing is run by the owner, so the person to reach is
+// the partner on that deal. Investment press releases quote them: "said Jane Doe, Partner at Audax" / "Audax Principal John Roe".
+const TITLE = String.raw`((?:Senior |Managing |Operating |Founding |Executive )?(?:Partner|Principal|Managing Director|Director|Vice President|Co-Founder|Founder)(?: and [A-Z][\w ]{2,30}?)?)`;
+export const sponsorQuery = (owner, name) => `"${owner}" "${brand(name)}"`;
+export function sponsorsIn(text, owner) {
+  const t = String(text || '').replace(/\s+/g, ' '), o = esc(String(owner || '').replace(/,?\s+(LLC|L\.?P\.?|Inc\.?)$/i, '').trim()), out = [];
+  if (!o) return out;
+  const rx = [
+    [new RegExp(String.raw`${NAME},\s+(?:a |the |an )?${TITLE}\s+(?:at|of|with)\s+${o}`, 'g'), 1, 2],
+    [new RegExp(String.raw`${o}(?:'s|’s)?\s+${TITLE}\s+${NAME}`, 'g'), 2, 1],
+  ];
+  for (const [re, ni, ti] of rx) for (const m of t.matchAll(re)) {
+    const name = m[ni].trim();
+    if (NOT_NAME.test(name) || name.split(' ').length < 2 || out.some(x => x.name === name)) continue;
+    out.push({ name, title: m[ti].trim(), quote: m[0].slice(0, 300) });
+  }
+  return out;
+}
+// Pages about the owner + company -> partners; those in a sentence naming the company first.
+export function sponsorsFromPages(name, owner, pages) {
+  const key = norm(brand(name)), out = [];
+  for (const p of pages) for (const q of sentences(p.text)) for (const s of sponsorsIn(q, owner)) {
+    const i = out.findIndex(x => x.name === s.name), on = has(q, key) || has(p.title || '', key);
+    if (i < 0) out.push({ ...s, on_deal: on, url: p.url }); else if (on) out[i].on_deal = true;
+  }
+  return out.sort((a, b) => Number(b.on_deal) - Number(a.on_deal));
+}
