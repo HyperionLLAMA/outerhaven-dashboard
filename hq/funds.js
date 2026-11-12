@@ -320,7 +320,7 @@ function settingsModal() {
       <h4>Reliable schedule</h4>
       <p>GitHub's own timer is best-effort and skips most runs (Oct 3–5: about 6 of 25 a day, hours late). HQ's database starts the runs on time instead (daily 09:40 MYT, checks hourly at :10) once it has a GitHub token that may start workflows. Paste it once:</p>
       <ol>
-        <li>Who: the repo owner (Chase) makes a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token ↗</a>: repository <b>outerhaven-dashboard</b> only, permission <b>Actions: Read and write</b>, expiry 1 year. (Anyone else with push access can use a <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=OuterHaven%20HQ%20dispatch" target="_blank" rel="noopener">classic token ↗</a> with <b>repo</b> + <b>workflow</b>.)</li>
+        <li>Who: the repo owner (Tengku) makes a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token ↗</a>: repository <b>outerhaven-dashboard2</b> only, permission <b>Actions: Read and write</b>, expiry 1 year. (Anyone else with push access can use a <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=OuterHaven%20HQ%20dispatch" target="_blank" rel="noopener">classic token ↗</a> with <b>repo</b> + <b>workflow</b>.)</li>
         <li>Paste it here: <input type="password" id="fsGhTok" placeholder="github_pat_… or ghp_…" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsGhSave">Save</button> <button type="button" class="btn sm ghost" id="fsGhClear">Remove</button></li>
       </ol>
       <p id="fsGhStatus" class="s muted">Checking…</p>
