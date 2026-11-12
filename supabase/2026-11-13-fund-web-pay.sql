@@ -6,6 +6,9 @@ alter table public.fund_signals add column if not exists web jsonb;
 alter table public.fund_signals add column if not exists web_checked_at timestamptz;
 create index if not exists fund_signals_web_todo on public.fund_signals (score desc) where web_checked_at is null and verdict in ('target', 'maybe');
 
+-- Monthly Exa budget in USD (13 Nov 2026, Tengku: cap it at $10). fund-web spreads it over the days left in the month.
+alter table public.growth_settings add column if not exists fund_web_budget numeric not null default 10;
+
 -- One row per fund checked (daily cap + cost log). Admins read it; only the service role writes.
 create table if not exists public.fund_web_runs (
   id bigserial primary key,

@@ -325,7 +325,8 @@ function settingsModal() {
       </ol>
       <p id="fsGhStatus" class="s muted">Checking…</p>
       <h4>Web checks (Exa)</h4>
-      <p>Form D can't say if a fund held its final close, for how much, if a newer fund is already out, or the firm's AUM. HQ asks the web: two Exa searches per fund (its name, then the people on its Form D), and keeps a fact only when the page names the manager and the quote is on the page word for word. Every 30 min the best unchecked targets are checked (40 funds a day, about $0.03–0.05 each); targets are re-checked after 45 days. "Check web" on a card runs one now.</p>
+      <p>Form D can't say if a fund held its final close, for how much, if a newer fund is already out, or the firm's AUM. HQ asks the web: two Exa searches per fund (its name, then the people on its Form D), and keeps a fact only when the page names the manager and the quote is on the page word for word. Every 30 min the best unchecked targets are checked (about $0.03–0.05 a fund); targets are re-checked after 45 days. "Check web" on a card runs one now.</p>
+      <p>Monthly budget: $<input type="number" id="fsExaBudget" min="0" step="1" style="width:80px"> <button type="button" class="btn sm" id="fsExaBudgetSave">Save</button> <span id="fsExaSpent" class="s muted"></span><br><span class="s muted">Spread evenly over the days left in the month; checks stop when it's used up.</span></p>
       <ol><li>Get a key at <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai ↗</a>.</li>
       <li>Paste it here: <input type="password" id="fsExa" placeholder="Exa API key" autocomplete="off" style="width:min(100%,320px)"> <button type="button" class="btn sm primary" id="fsExaSave">Save</button></li></ol>
       <p id="fsExaStatus" class="s muted">Checking…</p>
@@ -343,6 +344,19 @@ function settingsModal() {
   ghStatus();
   const exaStatus = async () => { const { data } = await sb.rpc('contact_keys_set'); const e = $('#fsExaStatus', m); if (e) e.textContent = data?.exa ? 'Exa key saved: web checks run every 30 min.' : 'No Exa key yet: web checks are off.'; };
   exaStatus();
+  (async () => {
+    const month = new Date(); month.setUTCDate(1); month.setUTCHours(0, 0, 0, 0);
+    const [g, r] = await Promise.all([sb.from('growth_settings').select('fund_web_budget').eq('id', 1).maybeSingle(), sb.from('fund_web_runs').select('cost_usd').gte('created_at', month.toISOString())]);
+    const b = $('#fsExaBudget', m); if (b) b.value = g.data?.fund_web_budget ?? 10;
+    const spent = (r.data || []).reduce((n, x) => n + (Number(x.cost_usd) || 0), 0), e = $('#fsExaSpent', m);
+    if (e) e.textContent = `$${spent.toFixed(2)} spent this month, ${(r.data || []).length} funds checked.`;
+  })();
+  $('#fsExaBudgetSave', m).onclick = async () => {
+    const v = Number($('#fsExaBudget', m).value);
+    if (!(v >= 0)) { toast('Enter a dollar amount.'); return; }
+    if (fail(await sb.from('growth_settings').update({ fund_web_budget: v }).eq('id', 1), 'Save budget')) return;
+    toast(`Web-check budget set to $${v} a month.`);
+  };
   $('#fsExaSave', m).onclick = async () => {
     const v = $('#fsExa', m).value.trim(); $('#fsExa', m).value = '';
     if (v.length < 16) { toast('That doesn\'t look like an Exa key.'); return; }

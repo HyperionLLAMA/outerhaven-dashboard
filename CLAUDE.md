@@ -244,7 +244,7 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   names the manager, and the fund name / quote carries the manager keyword; amounts come from the quote (`amountNear`, the amount after
   the close / AUM cue), never the LLM. Stored on every vehicle of the fund_key: `fund_signals.web` {at, pages, facts, final, first, later,
   aum, cost} + `web_checked_at`, then fund-signals ingest kind `rejudge` {ids} (rows also set `rules_version` 0 as a fallback).
-  pg_cron `fund-web` at :05/:35 (`invoke_fund_web()`, FUND_CRON_SECRET): best unchecked target/maybe funds, 4 a run, `DAILY_CAP` 40 a day
+  pg_cron `fund-web` at :05/:35 (`invoke_fund_web()`, FUND_CRON_SECRET): best unchecked target/maybe funds, 4 a run, monthly budget `growth_settings.fund_web_budget` (default $10, Setup) spread over the days left, hard cap 40 a day
   (counted in `fund_web_runs`, which logs Exa's `costDollars`), re-checked after 45 days. HQ card: "Check web" (admin action `check` {id})
   and a "Web check" fold with each fact, its quote and source link. Key `EXA_API_KEY` via Fund signals → Setup (`set_contact_key`,
   write-only; never enter it for the user). Rules: web final close of this fund = stage closed at that size (+12) on the next-fund list,

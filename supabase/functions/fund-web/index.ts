@@ -12,10 +12,24 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-outerhaven-cron", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "content-type": "application/json" } });
-const DAILY_CAP = 40;      // funds a day by the cron: ~2 searches x 5 pages with summaries each (roughly $0.03-0.05 a fund)
+const DAILY_CAP = 40;      // hard ceiling on funds a day; the monthly budget below usually binds first
 const PER_RUN = 4;         // funds per 30-min run; each takes ~10-25 s (two searches in parallel)
 const RECHECK_DAYS = 45;   // closes and new funds get announced; targets are looked at again after this
 const DAY = 864e5;
+const EST = 0.05;          // worst-case cost of one fund, used to stop before going over the budget
+
+// Monthly budget (growth_settings.fund_web_budget, default $10, set in Fund signals → Setup), spread evenly over the days
+// left so it doesn't run dry in the first week. Spend = Exa's own costDollars, logged per fund in fund_web_runs.
+async function budget() {
+  const cap = Number((await sb.from("growth_settings").select("fund_web_budget").eq("id", 1).maybeSingle()).data?.fund_web_budget ?? 10);
+  const now = new Date(), month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), day = new Date(now); day.setUTCHours(0, 0, 0, 0);
+  const rows = (await sb.from("fund_web_runs").select("cost_usd,created_at").gte("created_at", month.toISOString())).data || [];
+  const spent = rows.reduce((n, r: any) => n + (Number(r.cost_usd) || 0), 0);
+  const today = rows.filter((r: any) => r.created_at >= day.toISOString()).reduce((n, r: any) => n + (Number(r.cost_usd) || 0), 0);
+  const daysLeft = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).getTime() / DAY - day.getTime() / DAY;
+  const todayAllowance = Math.max(0, (cap - spent + today) / Math.max(1, daysLeft));
+  return { cap, spent, left: cap - spent, todayLeft: Math.min(cap - spent, todayAllowance - today) };
+}
 
 async function secret(key: string) {
   const r = await sb.from("integration_secrets").select("secret_value").eq("key", key).maybeSingle();
@@ -65,11 +79,14 @@ async function cron() {
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const done = (await sb.from("fund_web_runs").select("id", { count: "exact", head: true }).gte("created_at", today.toISOString())).count || 0;
   if (done >= DAILY_CAP) return { skipped: "daily cap", done };
+  const b = await budget();
+  if (b.todayLeft < EST) return { skipped: "budget", spent: +b.spent.toFixed(2), cap: b.cap };
   const old = new Date(Date.now() - RECHECK_DAYS * DAY).toISOString();
   const rows = (await sb.from("fund_signals").select("*").in("list", ["live", "fund1"]).in("verdict", ["target", "maybe"]).neq("status", "dismissed")
     .or(`web_checked_at.is.null,web_checked_at.lt.${old}`).order("score", { ascending: false }).limit(60)).data || [];
   const picked: any[] = [], keys = new Set<string>();
-  for (const r of rows) { if (r.fund_key && !keys.has(r.fund_key)) { keys.add(r.fund_key); picked.push(r); } if (picked.length >= Math.min(PER_RUN, DAILY_CAP - done)) break; }
+  const n = Math.min(PER_RUN, DAILY_CAP - done, Math.floor(b.todayLeft / EST));
+  for (const r of rows) { if (r.fund_key && !keys.has(r.fund_key)) { keys.add(r.fund_key); picked.push(r); } if (picked.length >= n) break; }
   const out: any[] = [];
   for (const s of picked) {
     try { const w = await checkFund(s, key); out.push({ fund: s.company_name, final: !!w.final, later: !!w.later, aum: w.aum?.amount || null }); }
@@ -92,6 +109,8 @@ Deno.serve(async req => {
     if (body.action === "check") {
       const key = await secret("EXA_API_KEY");
       if (!key) return json({ ok: false, error: "No Exa key yet: paste it in Fund signals → Setup." });
+      const b = await budget();
+      if (b.left < EST) return json({ ok: false, error: `This month's web-check budget ($${b.cap}) is used up. Raise it in Fund signals → Setup.` });
       const s = (await sb.from("fund_signals").select("*").eq("id", body.id).maybeSingle()).data;
       if (!s) return json({ ok: false, error: "Fund not found" }, 404);
       return json({ ok: true, web: await checkFund(s, key) });
