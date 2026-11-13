@@ -35,10 +35,17 @@ DEBT_CURRENT = ["LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCu
 REVOLVER = ["LinesOfCreditCurrent", "ShortTermBorrowings"]
 DEBT_NONCURRENT = ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations", "LongTermLineOfCredit",
                    "ConvertibleNotesPayableNoncurrent", "LongTermNotesPayable"]
+# Total debt, when a filer tags neither split above (13 Nov 2026 audit: 37 of 76 Maybes had dated maturities but "no debt
+# figure": Live Ventures, TerrAscend $218M due May 2027, Safehold, Katapult tag LongTermDebt / NotesPayable / SecuredDebt).
+DEBT_TOTAL = ["LongTermDebt", "DebtLongtermAndShorttermCombinedAmount", "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+              "NotesPayable", "SecuredDebt", "LoansPayable", "ConvertibleNotesPayable", "SeniorNotes", "LineOfCredit", "DebtInstrumentCarryingAmount"]
 CASH = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "Cash"]
 # Peter's leverage screen (8 Oct 2026): EBITDA = operating income + depreciation & amortisation (last calendar year), and
 # interest expense, so a maturity can be judged against cash flow (a strong earner just refinances at its bank).
 OP_INCOME = ["OperatingIncomeLoss"]
+# No operating income tag (REITs, some small caps): EBITDA = pretax income + interest + D&A.
+PRETAX = ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+          "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"]
 DA = ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization", "DepreciationAmortizationAndAccretionNet"]
 INTEREST = ["InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt", "InterestPaidNet"]
 # Loan type tag (3 Nov 2026, Tengku): which instruments the balance sheet reports, so the opener names the right market.
@@ -204,12 +211,47 @@ def new_debt_8k(rows, cik, after):
     return None
 
 
+_FACTS = {}
+
+
+def company_facts(cik):
+    """us-gaap facts of one filer (cached: revenue and debt fallbacks read the same file). None = could not read it."""
+    if cik not in _FACTS:
+        try:
+            _FACTS[cik] = (download_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json").get("facts") or {}).get("us-gaap") or {}
+        except Exception:  # noqa: BLE001
+            _FACTS[cik] = None
+    return _FACTS[cik]
+
+
+def latest_debt(facts, today, max_age=270):
+    """Total debt from a filer's own facts when the quarter frames missed it (odd fiscal quarter-ends, other tags): the newest
+    10-Q / 10-K balance-sheet date within max_age days, summing current + non-current there, else the largest total tag."""
+    if not facts:
+        return None
+    since = (today - dt.timedelta(days=max_age)).isoformat()
+    def at(tags):
+        out = {}
+        for t in tags:
+            for r in ((facts.get(t) or {}).get("units") or {}).get("USD", []):
+                if r.get("form") in ("10-Q", "10-K", "10-Q/A", "10-K/A") and not r.get("start") and r.get("end", "") >= since and r.get("val") is not None:
+                    e = r["end"]
+                    out[e] = max(out.get(e, 0), float(r["val"]))
+        return out
+    cur, non, tot = at(DEBT_CURRENT), at(DEBT_NONCURRENT), at(DEBT_TOTAL)
+    ends = sorted(set(cur) | set(non) | set(tot), reverse=True)
+    if not ends:
+        return None
+    e = ends[0]
+    split = cur.get(e, 0) + non.get(e, 0)
+    return max(split, tot.get(e, 0)) or None
+
+
 def annual_revenue(cik):
     """Latest full-year revenue from the company's own XBRL facts (for companies the calendar-year frame missed, e.g. odd
     fiscal years). 0 = the company reports no revenue at all (pre-revenue); None = could not read it."""
-    try:
-        facts = (download_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json").get("facts") or {}).get("us-gaap") or {}
-    except Exception:  # noqa: BLE001
+    facts = company_facts(cik)
+    if facts is None:
         return None
     best_row = None
     for tag in REVENUE:
@@ -248,15 +290,20 @@ def credit():
     log(f"credit: balance sheet period {period}")
     val = lambda m, c: m[c][0] if c in m else None
     dcur, dnon, rvl = best(DEBT_CURRENT, period), best(DEBT_NONCURRENT, period), best(REVOLVER, period)
+    tot = best(DEBT_TOTAL, period)
+    # Debt when neither split is tagged: the total tags (a debt figure the rules can use instead of "no debt figure").
+    debt_any = lambda c: ((val(dcur, c) or 0) + (val(dnon, c) or 0)) or (val(tot, c) or 0)  # noqa: E731
     rev = best(REVENUE, f"CY{today.year - 1}")
     rev.update({k: v for k, v in best(REVENUE, f"CY{today.year - 2}").items() if k not in rev})
     flt = frame("EntityPublicFloat", f"CY{today.year - 1}Q2I", tax="dei")
     yr = f"CY{today.year - 1}"
-    opi, dna, intx = best(OP_INCOME, yr), best(DA, yr), best(INTEREST, yr)
+    opi, dna, intx, ptx = best(OP_INCOME, yr), best(DA, yr), best(INTEREST, yr), best(PRETAX, yr)
     dtypes = {label: best(tags, period) for label, tags in DEBT_TYPES.items()}
     debt_types = lambda c: [label for label, m in dtypes.items() if (val(m, c) or 0) > 0]
     def ebitda(c):
         o = val(opi, c)
+        if o is None and val(ptx, c) is not None:   # no operating income tag: pretax income + interest
+            o = val(ptx, c) + (val(intx, c) or 0)
         return None if o is None else o + (val(dna, c) or 0)
 
     since = (today - dt.timedelta(days=180)).isoformat()
@@ -284,8 +331,8 @@ def credit():
     # Maturity watch (7 Nov 2026 audit: 23 targets of 1,123 rows, because only distress made the list): healthy, lendable-size
     # borrowers are read too, and kept only if their filing dates a maturity 4-24 months out. That is the refinancing lane.
     watch = set()
-    for c in set(dnon) | set(dcur):
-        total = (val(dnon, c) or 0) + (val(dcur, c) or 0)
+    for c in set(dnon) | set(dcur) | set(tot):
+        total = debt_any(c)
         e, r, fl = ebitda(c), val(rev, c), val(flt, c)
         if c not in cands and 20e6 <= total <= 300e6 and 20e6 <= (r or 0) <= 1e9 and e is not None and e > 0 and (fl is None or fl <= 2e9):
             watch.add(c)
@@ -342,8 +389,13 @@ def credit():
             if not soon:
                 continue
             kept += 1
+        dn = val(dnon, c)
+        if dn is None and val(dcur, c) is None:   # no split tagged: total-debt frame, else the filer's own latest balance sheet
+            dn = val(tot, c) or (latest_debt(company_facts(c), today) if p.get("filingUrl") else None)
+            if dn:
+                flags["debt_src"] = "total"
         batch.append({"cik": c, **p, "periodEnd": (dcur.get(c) or cash.get(c) or (None, None))[1], "debtCurrent": val(dcur, c),
-                      "debtNoncurrent": val(dnon, c), "revolverCurrent": val(rvl, c), "cash": val(cash, c), "revenue": val(rev, c), "publicFloat": val(flt, c), "flags": flags,
+                      "debtNoncurrent": dn, "revolverCurrent": val(rvl, c), "cash": val(cash, c), "revenue": val(rev, c), "publicFloat": val(flt, c), "flags": flags,
                       "ebitda": ebitda(c), "interestExpense": val(intx, c), "debtTypes": debt_types(c)})
         if len(batch) >= 100:
             r = post({"action": "ingest", "kind": "credit", "items": batch, "period": period, "run": run, "stats": STATS})
