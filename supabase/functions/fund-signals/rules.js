@@ -564,18 +564,18 @@ export function classifyCredit(s) {
   if (rx.length && !cuts.length && total >= 10e6 && s.revenue >= 20e6) {
     const X = [], x = (tone, text, pts = 0) => X.push({ tone, text, pts });
     rx.forEach(r => { r.tone = 'info'; r.pts = 0; });
-    if (f.forbearance) x('good', 'Rescue: its lender signed a forbearance, the clock is running', 25);
-    if (f.going_concern) x('good', 'Rescue: going-concern warning, it needs new money to survive', 15);
-    if (soon && soon.m >= 4) x('good', `Rescue: debt matures in ${Math.round(soon.m)} months`, soon.m <= 12 ? 20 : 10);
-    if (dueNow) x('good', `Rescue: ${money(dc)} due within 12 months against ${money(cash)} cash`, 15);
-    if (s.revenue <= 200e6) x('good', `Rescue fit: ${money(s.revenue)} revenue, below what the big restructuring banks take on`, 10);
+    if (f.forbearance) x('good', 'Lender forbearance signed: the clock is running', 25);
+    if (f.going_concern) x('good', 'Going-concern warning: it needs new money to survive', 15);
+    if (soon && soon.m >= 4) x('good', `Debt matures in ${Math.round(soon.m)} months: a hard deadline`, soon.m <= 12 ? 20 : 10);
+    if (dueNow) x('good', `${money(dc)} due within 12 months against ${money(cash)} cash: can't repay it`, 15);
+    if (s.revenue <= 200e6) x('good', `${money(s.revenue)} revenue: below what the big restructuring banks take on`, 10);
     else if (s.revenue <= 1e9) x('info', `${money(s.revenue)} revenue`, 5);
-    if (total >= 20e6 && total <= 150e6) x('good', `Rescue fit: ${money(total)} of debt, the size special situations lenders write`, 10);
+    if (total >= 20e6 && total <= 150e6) x('good', `${money(total)} of debt: the size special situations lenders write`, 10);
     if (e <= 0) {
       const burn = -e / s.revenue;
       if (burn <= 0.1) x('good', `Losses only ${Math.round(burn * 100)}% of revenue: a fixable business`, 10);
       else if (burn > 0.25) x('maybe', `Losses ${Math.round(burn * 100)}% of revenue: an equity problem, not a loan`, -15);
-    } else x('good', `Rescue fit: the business makes money (EBITDA ${money(e)}), the debt is the problem`, 10);
+    } else x('good', `The business makes money (EBITDA ${money(e)}): only the debt is the problem`, 10);
     if (s.public_float != null && s.public_float <= 300e6) x('info', `Small cap (public float ${money(s.public_float)})`, 5);
     const news = R.filter(r => /^(May already be refinanced|Already has a banker|Being sold)/.test(r.text));
     const pts = X.reduce((n, r) => n + r.pts, 0) + news.reduce((n, r) => n + r.pts, 0);
