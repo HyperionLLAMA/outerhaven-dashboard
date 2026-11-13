@@ -305,7 +305,7 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   after the 10-K / 10-Q we read maturities from → `flags.new_debt_8k` {date, items, url}. A dated maturity with one = Maybe −15 "may
   already be refinanced, read the 8-K first" (an 8-K before that filing doesn't count). Test in test_credit_rules.mjs.
 - **Rescue lane (13 Nov 2026, Tengku: "we've been wasting leads"; Peter's background is distressed / special situations;
-  CREDIT_RULES_VERSION 14):** burning cash / over-levered used to be a cut. Now, when that is the ONLY cut reason and the company has
+  CREDIT_RULES_VERSION 14–15):** burning cash / over-levered used to be a cut. Now, when that is the ONLY cut reason and the company has
   $20M+ revenue and $10M+ debt, `classifyCredit` returns verdict `rescue` with its own score (forbearance +25, going concern +15,
   maturity 4–12 mo +20 / 12–24 +10, debt due > cash +15, revenue $20–200M +10, debt $20–150M +10, losses ≤10% of revenue or positive
   EBITDA +10, losses >25% of revenue −15, news after the filing −10 to −20). ~212 companies on the first count. Credit tab → Rescue
