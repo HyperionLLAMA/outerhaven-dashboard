@@ -27,6 +27,7 @@ assert.equal(celu.verdict, 'cut', 'Celularity: no debt on file, nothing to refin
 for (const r of [xcf, hyfm, agen, kpti]) assert.equal(r.verdict, 'rescue');
 assert.ok(agen.score > xcf.score && agen.score > hyfm.score, `Agenus (losses 9% of revenue, ${agen.score}) ranks above XCF / Hydrofarm (losses > revenue)`);
 assert.ok(xcf.reasons.some(x => /an equity problem/.test(x.text)));
+assert.ok(hyfm.score <= 40 && xcf.score <= 40, 'losses over a quarter of revenue never rank above 40');
 console.log('rescue lane ok');
 assert.ok(ams.tags.includes('lendable') && dlh.tags.includes('lendable'));
 // Too big (4 Nov 2026): INNOVATE $616M debt, Universal Logistics $1.56B revenue.

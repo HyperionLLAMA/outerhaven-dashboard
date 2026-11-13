@@ -440,7 +440,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 15;
+export const CREDIT_RULES_VERSION = 16;
 // Company web check (fund-web company.js, 13 Nov 2026): news from the past year that makes a maturity pitch wrong. A fact dated
 // before our filing is already in the numbers (info); after it, or undated, it changes the call.
 export function webNews(web, since) {
@@ -577,10 +577,12 @@ export function classifyCredit(s) {
       else if (burn > 0.25) x('maybe', `Losses ${Math.round(burn * 100)}% of revenue: an equity problem, not a loan`, -15);
     } else x('good', `The business makes money (EBITDA ${money(e)}): only the debt is the problem`, 10);
     if (s.public_float != null && s.public_float <= 300e6) x('info', `Small cap (public float ${money(s.public_float)})`, 5);
-    const news = R.filter(r => /^(May already be refinanced|Already has a banker|Being sold)/.test(r.text));
-    const pts = X.reduce((n, r) => n + r.pts, 0) + news.reduce((n, r) => n + r.pts, 0);
+    // Penalties from the shared checks still count (news after the filing, a new-debt 8-K, an old balance sheet).
+    const pts = X.reduce((n, r) => n + r.pts, 0) + R.filter(r => r.pts < 0 && r.tone !== 'info').reduce((n, r) => n + r.pts, 0);
+    // Losses over a quarter of revenue need equity, not a loan: never above the fixable ones (Hydrofarm 189%, FiscalNote 52%).
+    const deep = e <= 0 && -e / s.revenue > 0.25;
     const keep = R.filter(r => r.tone !== 'good');   // refinancing-lane points don't apply here; checks, news and context stay
-    return { verdict: 'rescue', score: Math.max(0, Math.min(100, pts)), reasons: [...X, ...keep].map(({ tone, text }) => ({ tone, text })), tags: [...tags, 'lane_rescue'].filter((t, i, a) => a.indexOf(t) === i) };
+    return { verdict: 'rescue', score: Math.max(0, Math.min(deep ? 40 : 100, pts)), reasons: [...X, ...keep].map(({ tone, text }) => ({ tone, text })), tags: [...tags, 'lane_rescue'].filter((t, i, a) => a.indexOf(t) === i) };
   }
   rx.forEach(r => r.tone = 'cut');
   const verdict = R.some(r => r.tone === 'cut') ? 'cut' : R.some(r => r.tone === 'maybe') ? 'maybe' : 'target';
