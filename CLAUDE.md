@@ -283,6 +283,14 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   release (`sponsorsIn()`: "said X, Partner at Owner" / "Owner Principal X"), then their LinkedIn → signal-contacts ingest `sponsor`
   (role 'sponsor', shown as "Owner" on the card; not used by the batch, which only takes refi targets). Tests: test_company_web.mjs,
   test_contacts_parse.mjs, test_officers.py.
+- **LinkedIn URLs for fund GPs + Google fallback (13 Nov 2026, Tengku: "we need their LinkedIn URL"):** signal-contacts `lookupFund(fund_key)`
+  searches each of the first 3 Form D people on Google via Serper (`"<name>" <firm> site:linkedin.com/in`, firm = fund name minus
+  "Fund II, L.P." via `firmOf`; Brave if no Serper key) and keeps a profile only when `personProfile()` (parse.js) matches first + last
+  name AND a distinctive firm word in the title or snippet, not "former". Stored as `signal_contacts` kind 'fund', key = fund_key
+  (people role 'gp', source 'formd'). The existing signal-contacts cron also does 8 fund targets a run (best score first, outside the
+  Brave daily cap); admin `{action:'lookup', kind:'fund', key}`. Fund cards show "✓ Name · LinkedIn ↗" when found, else the search link.
+  Needs `supabase/2026-11-13-fund-contacts.sql` (adds 'fund' to the kind check; DROP CONSTRAINT, so the user runs it in the SQL editor);
+  until then the cron stops before searching. Credit / BDC lookups now fall back to Serper when Brave finds no profile.
 - **Will they pay? (13 Nov 2026):** `people.pay_score` 0–5 (+ `pay_note`, `pay_at`) set in the Pipeline update window: demonstrated
   willingness from a conversation, never predicted (0 unknown, 1 no / free intros only, 2 resists upfront fees, 3 open to a paid scope,
   4 discussing budget / terms / pilot, 5 signed and paid). It's the "who paid, who didn't, why" log per signal source.

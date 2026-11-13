@@ -176,3 +176,27 @@ export function elsewhereFrom(results, name, company) {
   }
   return null;
 }
+
+// Fund GPs (13 Nov 2026): a Form D names the people ("Jane Doe, Managing Member"); find THAT person's LinkedIn. A result counts
+// when the profile title starts with their first and last name and the title or snippet names the firm (a distinctive firm word:
+// "Slauson", "Portal"), so a namesake at another job never matches. firm = the fund name minus "Fund II, L.P." (fund-web firmName).
+const FUND_WORDS = new Set('fund funds capital partners ventures venture management advisors advisers investments investment equity holdings fi lp gp i ii iii iv v vi'.split(' '));
+export function personProfile(results, name, firm) {
+  const want = String(name || '').toLowerCase().replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+  if (want.length < 2) return null;
+  const key = distinct(brand(firm)).filter(w => !FUND_WORDS.has(w) && w.length >= 3);
+  for (const r of results || []) {
+    const url = String(r?.url || '');
+    if (!/^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\//i.test(url)) continue;
+    const title = String(r.title || '').replace(/\s*\|\s*LinkedIn\s*$/i, '').trim(), parts = title.split(/\s+[-–—|]\s+/);
+    const got = (parts[0] || '').toLowerCase().replace(/,.*$/, '').replace(/[^a-z\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+    if (!got.length || got[0] !== want[0] || got[got.length - 1] !== want[want.length - 1]) continue;
+    const text = words(`${title} ${r.description || ''}`).join(' ');
+    if (key.length && !key.some(w => ` ${text} `.includes(` ${w} `))) continue;
+    if (/\b(former|ex-|previously|retired)\b/i.test(parts.slice(1).join(' '))) continue;
+    return { name: parts[0].replace(/,.*$/, '').trim(), title: parts.slice(1).join(' - ').slice(0, 80), linkedin: url.split('?')[0], firm_checked: key.length > 0 };
+  }
+  return null;
+}
+// Serper (Google) result -> the shape profileFrom / personProfile read (Brave's url / title / description).
+export const fromSerper = h => ({ url: h?.link || '', title: h?.title || '', description: h?.snippet || '' });

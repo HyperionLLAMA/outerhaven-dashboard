@@ -120,3 +120,13 @@ console.log('ownership: ok');
   assert.equal(p.length, 1); assert.ok(p[0].appointed);
   console.log('middle initials ok');
 }
+{
+  const { personProfile } = await import('../../supabase/functions/signal-contacts/parse.js');
+  const r = (title, url = 'https://www.linkedin.com/in/x', description = '') => ({ url, title, description });
+  assert.equal(personProfile([r('Jane Doe - Managing Partner - Slauson & Co. | LinkedIn')], 'Jane Doe', 'Slauson & Co. Fund II, L.P.').linkedin, 'https://www.linkedin.com/in/x');
+  assert.equal(personProfile([r('Jane Doe - Partner at Acme Ventures | LinkedIn')], 'Jane Doe', 'Slauson & Co. Fund II, L.P.'), null, 'namesake at another firm');
+  assert.equal(personProfile([r('Jane Doe - Investor | LinkedIn', 'https://www.linkedin.com/in/y', 'Experience: Slauson & Co. · Location: LA')], 'Jane M Doe', 'Slauson & Co. Fund II, L.P.').linkedin, 'https://www.linkedin.com/in/y', 'firm in the snippet, middle initial on the filing');
+  assert.equal(personProfile([r('John Doe - Slauson | LinkedIn')], 'Jane Doe', 'Slauson Fund II'), null, 'different first name');
+  assert.equal(personProfile([r('Jane Doe - Former Partner at Slauson | LinkedIn')], 'Jane Doe', 'Slauson Fund II'), null);
+  console.log('fund people ok');
+}

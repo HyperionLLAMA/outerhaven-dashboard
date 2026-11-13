@@ -8,7 +8,7 @@
 //   'mark' {kind, key, name, status: 'confirmed'|'wrong'|null}.
 // Keys (pasted in HQ, write-only): BRAVE_SEARCH_KEY (LinkedIn + website), APIFY_TOKEN + HUNTER_API_KEY (work email). Missing key = that step is skipped.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { brand, searchName, profileFrom, websiteFrom, mergePeople, ownerFrom, applyChanges, elsewhereFrom } from "./parse.js";
+import { brand, searchName, profileFrom, websiteFrom, mergePeople, ownerFrom, applyChanges, elsewhereFrom, personProfile, fromSerper } from "./parse.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!, SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
@@ -51,6 +51,13 @@ async function brave(q: string, key: string) {
     return ((await r.json())?.web?.results || []) as any[];
   }
   return [];
+}
+
+// Google via Serper (13 Nov 2026): finds LinkedIn profiles Brave misses. $0.001 a search; key SERPER_API_KEY (Fund signals → Setup).
+async function serper(q: string, key: string) {
+  const r = await fetch("https://google.serper.dev/search", { method: "POST", headers: { "content-type": "application/json", "X-API-KEY": key }, body: JSON.stringify({ q, num: 10 }) });
+  if (!r.ok) return [];
+  return (((await r.json())?.organic || []) as any[]).map(fromSerper);
 }
 
 // Re-judge BDC rows after their owner changed (rules live in the bdc-signals function).
@@ -110,9 +117,13 @@ async function lookup(kind: string, key: string, name?: string) {
   // Named officers (SEC signers, 8-K / news appointees): search each by name for their LinkedIn. Otherwise search the company for roles.
   // People marked as left are skipped. A profile under the name that now shows another employer = "LinkedIn shows <X>" (13 Nov 2026).
   const named = people.filter((p: any) => NAMED.includes(p.source) && !p.linkedin && !p.left).slice(0, 3);
+  const sk = await secret("SERPER_API_KEY");
+  const same = (x: any, p: any) => x && x.name.split(" ").pop()!.toLowerCase() === String(p.name).split(" ").pop()!.toLowerCase();
   for (const p of named) {
-    const res = await brave(`"${p.name}" "${b}" site:linkedin.com/in`, bk);
-    const hit = res.map(r => profileFrom(r, company, true)).find(x => x && x.name.split(" ").pop()!.toLowerCase() === String(p.name).split(" ").pop()!.toLowerCase());
+    let res = await brave(`"${p.name}" "${b}" site:linkedin.com/in`, bk);
+    let hit = res.map(r => profileFrom(r, company, true)).find(x => same(x, p));
+    // Brave missed: Google (Serper) indexes far more LinkedIn profiles.
+    if (!hit && sk) { const g = await serper(`"${p.name}" ${b} site:linkedin.com/in`, sk); hit = g.map(r => profileFrom(r, company, true)).find(x => same(x, p)); if (!hit) res = res.concat(g); }
     const away = hit ? null : elsewhereFrom(res, p.name, company);
     found.push({ ...p, ...(hit ? { linkedin: hit.linkedin } : {}), ...(away ? { li_elsewhere: away } : {}), li_checked: new Date().toISOString() });
   }
@@ -122,6 +133,7 @@ async function lookup(kind: string, key: string, name?: string) {
     let res = await brave(`"${b}" ${roles}`, bk);
     // Legal name found nothing: retry with the distinctive words only (trading names differ in filler words).
     if (!res.some(r => profileFrom(r, company)) && loose) res = await brave(`"${alt}" ${roles}`, bk);
+    if (!res.some(r => profileFrom(r, company)) && sk) res = await serper(`"${b}" (CFO OR "Chief Financial Officer" OR CEO OR President) site:linkedin.com/in`, sk);
     const seen = new Set<string>();
     for (const r of res) { const p = profileFrom(r, company); if (p && !seen.has(p.name)) { seen.add(p.name); found.push({ ...p, source: "search", source_url: p.linkedin }); } }
   }
@@ -186,11 +198,45 @@ async function email(kind: string, key: string, name: string, role = "", typed =
   return { ok: true, email: d.email || null, score: d.score ?? null, status: d.status || null, src: d.src };
 }
 
+// Fund GPs (13 Nov 2026, Tengku: "we need their LinkedIn URL"): the people named on the Form D, searched by name + firm on Google
+// (Serper; Brave if no Serper key). Stored as signal_contacts kind 'fund', key = fund_key (one row per fund, not per vehicle).
+const firmOf = (n: string) => String(n || "").replace(/\([^)]*\)/g, " ").replace(/,?\s*\b(l\.?\s?p\.?|llc|l\.?l\.?c\.?|ltd|inc|scsp)\b\.?/gi, " ")
+  .replace(/\s+(?:fund\s+)?(?:[IVX]{1,4}|\d{1,2})(?:-[A-Z0-9]+)?\b.*$/i, "").replace(/\s+fund\b.*$/i, "").replace(/[,\s]+$/, "").replace(/\s+/g, " ").trim();
+async function lookupFund(fundKey: string) {
+  const s = (await sb.from("fund_signals").select("company_name,executives,check_keyword").eq("fund_key", fundKey).order("score", { ascending: false }).limit(1).maybeSingle()).data;
+  if (!s) throw new Error("Fund not found");
+  const sk = await secret("SERPER_API_KEY"), bk = sk ? "" : await secret("BRAVE_SEARCH_KEY");
+  if (!sk && !bk) return { ok: false, note: "no key" };
+  const firm = firmOf(s.company_name) || s.check_keyword || s.company_name;
+  const row = await getRow("fund", fundKey), now = new Date().toISOString();
+  const people = await Promise.all(((s.executives || []) as any[]).filter(p => p?.name).slice(0, 3).map(async (p: any) => {
+    const old = (row?.people || []).find((o: any) => o.name === p.name);
+    if (old?.linkedin || old?.status) return old;
+    const q = `"${p.name}" ${firm} site:linkedin.com/in`;
+    const res = sk ? await serper(q, sk) : await brave(q, bk);
+    const hit = personProfile(res, p.name, firm);
+    return { name: p.name, role: "gp", title: hit?.title || p.title || null, linkedin: hit?.linkedin || null, source: "formd", li_checked: now };
+  }));
+  await save("fund", fundKey, { company_name: s.company_name, people, looked_up_at: now, lookup_note: people.some(p => p.linkedin) ? null : "No LinkedIn match for the Form D names." });
+  return { ok: true, found: people.filter(p => p.linkedin).length };
+}
+// Up to n fund targets a run (best score first, each fund once).
+async function funds(n = 8) {
+  const done = new Set(((await sb.from("signal_contacts").select("key").eq("kind", "fund").not("looked_up_at", "is", null)).data || []).map((r: any) => r.key));
+  const rows = (await sb.from("fund_signals").select("fund_key,score").eq("verdict", "target").in("status", ["new", "added"]).not("fund_key", "is", null).order("score", { ascending: false }).limit(2000)).data || [];
+  const todo = [...new Set((rows as any[]).map(r => r.fund_key))].filter(k => !done.has(k)).slice(0, n);
+  // The table only takes kind 'fund' after supabase/2026-11-13-fund-contacts.sql; until then, spend nothing on searches.
+  if (todo.length) { const t = await sb.from("signal_contacts").upsert({ kind: "fund", key: todo[0] }, { onConflict: "kind,key" }); if (t.error) return { funds_error: "run supabase/2026-11-13-fund-contacts.sql: " + t.error.message.slice(0, 80) }; }
+  let found = 0;
+  for (const k of todo) { try { found += (await lookupFund(k)).found || 0; } catch (e) { await save("fund", k, { looked_up_at: new Date().toISOString(), lookup_note: String((e as Error).message || e) }).catch(() => null); } }
+  return { funds_looked_up: todo.length, fund_profiles: found };
+}
+
 async function cron() {
   const bk = await secret("BRAVE_SEARCH_KEY");
   if (!bk) return { skipped: "no Brave key" };
   const since = new Date(Date.now() - 864e5).toISOString();
-  const today = (await sb.from("signal_contacts").select("key", { count: "exact", head: true }).gte("looked_up_at", since)).count || 0;
+  const today = (await sb.from("signal_contacts").select("key", { count: "exact", head: true }).in("kind", ["credit", "bdc", "ucc"]).gte("looked_up_at", since)).count || 0;   // fund lookups (Serper) don't use the Brave quota
   if (today >= DAILY_CAP) return { skipped: "daily cap", stale: await retryStale() };
   const done = new Set(((await sb.from("signal_contacts").select("kind,key,looked_up_at").not("looked_up_at", "is", null)).data || []).map((r: any) => `${r.kind}:${r.key}`));
   // Order: BDC and credit targets alternately (best first in each, so both outreach lanes fill), then UCC; nothing already looked up.
@@ -219,7 +265,8 @@ async function cron() {
       if (kind === "bdc") await sb.from("bdc_signals").update({ owner_checked_at: new Date().toISOString() }).eq("company_key", key);   // don't retry it every run
     }
   }
-  return { looked_up: n, left: Math.max(0, todo.length - n), stale: await retryStale() };
+  const f = await funds().catch(e => ({ funds_error: String(e).slice(0, 120) }));
+  return { looked_up: n, left: Math.max(0, todo.length - n), stale: await retryStale(), ...f };
 }
 
 async function ingest(body: any) {
@@ -287,6 +334,7 @@ Deno.serve(async (req) => {
     const user = await admin(req);
     if (!user) return json({ ok: false, error: "Admins only." }, 403);
     const kind = String(body.kind || ""), key = String(body.key || "");
+    if (kind === "fund" && key && body.action === "lookup") return json(await lookupFund(key));
     if (!TABLE[kind] || !key) return json({ ok: false, error: "kind and key needed" }, 400);
     if (body.action === "lookup") return json(await lookup(kind, key));
     if (body.action === "email") return json(await email(kind, key, String(body.name || "").trim(), String(body.role || ""), String(body.domain || "")));

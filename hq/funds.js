@@ -5,6 +5,7 @@ import { sb, state, esc, $, $$, toast, fail, modal, opts, firstName } from './co
 import { whyBlock } from './kinds.js';
 import { me } from './tasks.js';
 import { markBtns, markLine, bindMarks, MARK_VIEWS, inMarkView } from './marks.js';
+import { loadContacts, contactOf } from './contacts.js';
 
 let el = null, rows = [], runs = [], cfg = null, list = 'live', view = 'target', timer = null, onCount = () => {};
 let stageF = '', stratF = ''; // filters: '' = all
@@ -47,6 +48,7 @@ async function load() {
     sb.from('growth_settings').select('fund_scan_enabled,fund_monthly_budget').eq('id', 1).maybeSingle(),
     sb.from('fund_data_checks').select('*').order('created_at', { ascending: false }).limit(40),
     sb.rpc('signal_target_counts'),
+    loadContacts('fund', true).catch(() => null),   // GP LinkedIn profiles found by signal-contacts (kind 'fund', key = fund_key)
   ]);
   if (s.error) { rows = null; return; }
   cutCount = n.data?.funds_cut || {};
@@ -188,7 +190,8 @@ function rowHtml(s) {
       ${chk ? `<div class="fsCheck">${chk}</div>` : ''}
       ${webBlock(s)}
       <details class="fsPrep"><summary>Call prep: what to find out</summary><ol>${prep(s).map(q => `<li>${esc(q)}</li>`).join('')}</ol></details>
-      ${ppl.length ? `<div class="fsPeople">${ppl.map(p => `<a href="${liSearch(p.name, s)}" target="_blank" rel="noopener" title="Search LinkedIn">${esc(p.name)} ↗</a>`).join('')}${(s.executives || []).length > 4 ? `<span class="muted">+${s.executives.length - 4} more</span>` : ''}</div>` : ''}
+      ${ppl.length ? `<div class="fsPeople">${ppl.map(p => { const li = (contactOf('fund', s.fund_key)?.people || []).find(x => x.name === p.name)?.linkedin;
+        return li ? `<a href="${esc(li)}" target="_blank" rel="noopener" title="Their LinkedIn profile (matched by name and firm)">✓ ${esc(p.name)} · LinkedIn ↗</a>` : `<a href="${liSearch(p.name, s)}" target="_blank" rel="noopener" title="Not found yet: search LinkedIn">${esc(p.name)} ↗</a>`; }).join('')}${(s.executives || []).length > 4 ? `<span class="muted">+${s.executives.length - 4} more</span>` : ''}</div>` : ''}
     </div>
     <div class="fsAct">
       ${markBtns(s)}
