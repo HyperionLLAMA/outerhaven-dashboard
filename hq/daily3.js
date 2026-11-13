@@ -5,6 +5,7 @@
 // Quotas are team-wide and live here; change the numbers below.
 import { sb, esc, $$, avatar, acIdx } from './core.js';
 import { sendBatchModal, outreachSetup } from './outreach.js';
+import { linkedHelperModal } from './linkedhelper.js';
 
 export const DAILY3 = { contact: 20, calls: 1 };
 const SIGNAL_SOURCES = ['BDC loan signal', 'SEC credit signal', 'UCC signal'];
@@ -46,7 +47,7 @@ export async function renderDaily3(el, date) {
 
   const ownerChips = Object.entries(owners).sort((a, b) => b[1] - a[1]).map(([o, c]) => `<span class="d3Who" data-ac="${acIdx(o)}">${avatar(o, 'xs')}${esc(o)} ${c}</span>`).join('');
   const qTotal = (queue ?? 0) + (cleared ?? 0);
-  el.innerHTML = `<section class="card d3Card"><header><div><h2>Daily 3</h2><p>Volume first. Hit these before anything else today.</p></div><div class="row" style="gap:6px"><button type="button" class="btn sm ghost" id="d3Setup">Outreach setup</button><button type="button" class="btn sm primary" id="d3Send">Send today's batch</button></div></header>
+  el.innerHTML = `<section class="card d3Card"><header><div><h2>Daily 3</h2><p>Volume first. Hit these before anything else today.</p></div><div class="row" style="gap:6px"><button type="button" class="btn sm ghost" id="d3Setup">Outreach setup</button><button type="button" class="btn sm" id="d3Lh">Export for Linked Helper</button><button type="button" class="btn sm primary" id="d3Send">Send today's batch</button></div></header>
     <ol class="d3List">
       ${row(1, 'Credit targets worked', worked, ` / ${DAILY3.contact}`, worked / DAILY3.contact * 100,
         `${ownerChips || 'Nobody yet today.'} <span class="muted">${left.toLocaleString('en-US')} BDC + credit targets untouched${days ? ` · ${days} days at ${DAILY3.contact}/day` : ''}</span>`,
@@ -59,4 +60,5 @@ export async function renderDaily3(el, date) {
   $$('a', el).forEach(a => a.addEventListener('click', e => e.stopPropagation()));
   el.querySelector('#d3Send')?.addEventListener('click', () => sendBatchModal(() => renderDaily3(el, date)));
   el.querySelector('#d3Setup')?.addEventListener('click', outreachSetup);
+  el.querySelector('#d3Lh')?.addEventListener('click', () => linkedHelperModal());
 }

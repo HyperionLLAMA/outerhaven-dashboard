@@ -628,6 +628,15 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
   "HQ – private credit"; optionally duplicate the campaign minus the "Noticed…" line as the plain campaign and pick it in Outreach setup.
 - Hunter: one key, 50 lookups/month, now only the fallback behind Apify. Don't build rotation across extra free accounts (Tengku floated it; it breaks Hunter's terms).
 
+## Linked Helper export (14 Nov 2026, Tengku; `hq/linkedhelper.js`, `supabase/2026-11-14-lh-exports.sql`)
+- Today → Daily 3 → **Export for Linked Helper**: lane (Private credit = credit targets + BDC refi targets / Rescue / Funds = fund GPs),
+  "Sent from" is free text (any team member; defaults credit/rescue Tengku, funds Anaz, last pick remembered per lane), how many,
+  A/B split (alternating down the score order, one CSV per version), optional first_name/company/hook columns for Linked Helper's
+  custom-variables plug-in (off by default = `profile_url` only). Only people with a LinkedIn profile, not wrong / left / sponsor.
+- Linked Helper's own "LH CSV" is checksum-locked (edited/added columns = rejected), so we never write it; it's the format the
+  results import will READ later (match on linkedin_url → `lh_exports.status` / `replied_at`, reply rate per version).
+- `lh_exports` = one row per company (unique kind+key): never exported twice; also skips `outreach_enrollments` (Prosp).
+
 ## Post formats, format tests, breakdowns (11 Oct 2026; `hq/formats.js`, `hq/formattest.js`, `supabase/2026-10-11-post-formats.sql`)
 - `post_formats`: our names mapped to what LinkedIn shows (`linkedin_type`) + page shape for documents. **Presentation = landscape
   document, PDF carousel = portrait or square document** (our definition; editable in Schedule → Formats; two document formats must
