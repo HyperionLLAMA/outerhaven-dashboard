@@ -440,7 +440,7 @@ export function readCheck(s, items) {
 // ---- Credit signals: small US public companies that need private credit (Peter's lane) ----
 // Item from scripts/credit_signals.py: { cik, name, tickers, exchange, sic, sicDesc, state, periodEnd, debtCurrent,
 // debtNoncurrent, cash, revenue, publicFloat, flags: { going_concern?, forbearance? }, filingUrl }
-export const CREDIT_RULES_VERSION = 13;
+export const CREDIT_RULES_VERSION = 14;
 // Company web check (fund-web company.js, 13 Nov 2026): news from the past year that makes a maturity pitch wrong. A fact dated
 // before our filing is already in the numbers (info); after it, or undated, it changes the call.
 export function webNews(web, since) {
@@ -536,8 +536,8 @@ export function classifyCredit(s) {
   // Lendable band: 3-7x with interest covered 1.2x+ is what a private credit lender can refinance (AMS, DLH).
   if (e != null) {
     // Any cash burn is a rescue: net cash just means a runway (Karyopharm), and missing debt tags hide the debt (Celularity).
-    if (e <= 0) { trigger = true; tags.add('burning_cash'); add('cut', `Negative EBITDA (${money(e)})${net > 0 ? ` with ${money(net)} net debt` : ''}: burning cash, a rescue that private credit rarely refinances`, -20); }
-    else if (rescue) { trigger = true; tags.add('over_levered'); add('cut', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
+    if (e <= 0) { trigger = true; tags.add('burning_cash'); add('rx', `Negative EBITDA (${money(e)})${net > 0 ? ` with ${money(net)} net debt` : ''}: burning cash, a rescue that private credit rarely refinances`, -20); }
+    else if (rescue) { trigger = true; tags.add('over_levered'); add('rx', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: a rescue, private credit rarely refinances this`, -15); }
     else if (lev != null && lev >= 7 && (cover == null || cover < 2)) { tags.add('stretched'); trigger = true; add('good', `Net debt ${lev.toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}: likely to need a restructuring or refinancing (Peter's screen)`, 25); }
     else if (lev != null && lev >= 5) tags.add('stretched'), add('good', `Net debt ${lev.toFixed(1)}x EBITDA: highly levered`, 8);
     else if (lev != null && lev < 3 && (cover == null || cover >= 4) && !f.forbearance && !f.going_concern) tags.add('bank_refi'), add('maybe', `Strong cash flow (net debt ${Math.max(lev, 0).toFixed(1)}x EBITDA${cover != null ? `, interest covered ${cover.toFixed(1)}x` : ''}): its bank will refinance it, so it won't pay us`, -15);
@@ -556,6 +556,33 @@ export function classifyCredit(s) {
   if (!trigger) add('maybe', 'No refinancing deadline, leverage problem, forbearance or going-concern warning found');
   // Numbers we can't trust: no EBITDA, no debt on file, or interest cover too high to be real (1847 Holdings showed 60.9x).
   if (e == null || !total || (cover != null && cover > 30)) { tags.add('check_data'); add('maybe', e == null ? 'EBITDA not found in its filings: check the 10-Q' : !total ? 'No debt figure in its filings: check the 10-Q' : `Interest covered ${cover.toFixed(0)}x looks wrong: check the 10-Q`); }
+  // Rescue lane (v14, 13 Nov 2026, Tengku: 212 cut companies were Peter's distressed lane, not dead leads). Losing money or
+  // over-borrowed used to be a cut; now, when it's the ONLY reason to cut and the company is big enough to lend against
+  // ($20M+ revenue, $10M+ debt), it's verdict 'rescue', scored on its own: rescue financing / a pressured refinancing / a sale.
+  // Never in Send today's batch (that takes 'target' only) and never pitched with the refinancing message.
+  const cuts = R.filter(r => r.tone === 'cut'), rx = R.filter(r => r.tone === 'rx');
+  if (rx.length && !cuts.length && total >= 10e6 && s.revenue >= 20e6) {
+    const X = [], x = (tone, text, pts = 0) => X.push({ tone, text, pts });
+    rx.forEach(r => { r.tone = 'info'; r.pts = 0; });
+    if (f.forbearance) x('good', 'Rescue: its lender signed a forbearance, the clock is running', 25);
+    if (f.going_concern) x('good', 'Rescue: going-concern warning, it needs new money to survive', 15);
+    if (soon && soon.m >= 4) x('good', `Rescue: debt matures in ${Math.round(soon.m)} months`, soon.m <= 12 ? 20 : 10);
+    if (dueNow) x('good', `Rescue: ${money(dc)} due within 12 months against ${money(cash)} cash`, 15);
+    if (s.revenue <= 200e6) x('good', `Rescue fit: ${money(s.revenue)} revenue, below what the big restructuring banks take on`, 10);
+    else if (s.revenue <= 1e9) x('info', `${money(s.revenue)} revenue`, 5);
+    if (total >= 20e6 && total <= 150e6) x('good', `Rescue fit: ${money(total)} of debt, the size special situations lenders write`, 10);
+    if (e <= 0) {
+      const burn = -e / s.revenue;
+      if (burn <= 0.1) x('good', `Losses only ${Math.round(burn * 100)}% of revenue: a fixable business`, 10);
+      else if (burn > 0.25) x('maybe', `Losses ${Math.round(burn * 100)}% of revenue: an equity problem, not a loan`, -15);
+    } else x('good', `Rescue fit: the business makes money (EBITDA ${money(e)}), the debt is the problem`, 10);
+    if (s.public_float != null && s.public_float <= 300e6) x('info', `Small cap (public float ${money(s.public_float)})`, 5);
+    const news = R.filter(r => /^(May already be refinanced|Already has a banker|Being sold)/.test(r.text));
+    const pts = X.reduce((n, r) => n + r.pts, 0) + news.reduce((n, r) => n + r.pts, 0);
+    const keep = R.filter(r => r.tone !== 'good');   // refinancing-lane points don't apply here; checks, news and context stay
+    return { verdict: 'rescue', score: Math.max(0, Math.min(100, pts)), reasons: [...X, ...keep].map(({ tone, text }) => ({ tone, text })), tags: [...tags, 'lane_rescue'].filter((t, i, a) => a.indexOf(t) === i) };
+  }
+  rx.forEach(r => r.tone = 'cut');
   const verdict = R.some(r => r.tone === 'cut') ? 'cut' : R.some(r => r.tone === 'maybe') ? 'maybe' : 'target';
   const score = Math.max(0, Math.min(100, R.reduce((n, r) => n + r.pts, 0)));
   return { verdict, score: verdict === 'cut' ? Math.min(score, 20) : score, reasons: R.map(({ tone, text }) => ({ tone, text })), tags: [...tags] };

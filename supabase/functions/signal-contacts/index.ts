@@ -196,9 +196,10 @@ async function cron() {
   // Order: BDC and credit targets alternately (best first in each, so both outreach lanes fill), then UCC; nothing already looked up.
   const lists: Record<string, [string, string, string][]> = {};
   for (const kind of ["bdc", "credit", "ucc"]) {
-    let q = sb.from(TABLE[kind]).select(`${KEYCOL[kind]},company_name,score${kind === "bdc" ? ",owner_checked_at" : ""}`).eq("verdict", "target").in("status", ["new", "added"]);
+    // Credit: Rescue-lane companies too (13 Nov 2026), after every refinancing target.
+    let q = sb.from(TABLE[kind]).select(`${KEYCOL[kind]},company_name,score,verdict${kind === "bdc" ? ",owner_checked_at" : ""}`).in("verdict", kind === "credit" ? ["target", "rescue"] : ["target"]).in("status", ["new", "added"]);
     if (kind === "bdc") q = q.eq("lane", "refi");   // loan-sale targets are pitched to the lender, not the company
-    const rows = (await q.order("score", { ascending: false }).limit(1000)).data || [];
+    const rows = ((await q.order("score", { ascending: false }).limit(1000)).data || []).sort((a: any, b: any) => Number(a.verdict !== "target") - Number(b.verdict !== "target"));
     // BDC: anyone not owner-checked yet goes again (owner check added 12 Oct 2026), even if contacts were found before.
     lists[kind] = (rows as any[]).filter(r => kind === "bdc" ? !r.owner_checked_at : !done.has(`${kind}:${r[KEYCOL[kind]]}`))
       .map(r => [kind, String(r[KEYCOL[kind]]), r.company_name] as [string, string, string]);
@@ -223,7 +224,7 @@ async function cron() {
 
 async function ingest(body: any) {
   if (body.kind === "officers_todo") {
-    const rows = (await sb.from("credit_signals").select("cik,company_name").in("verdict", ["target", "maybe"]).in("status", ["new", "added"]).limit(2000)).data || [];
+    const rows = (await sb.from("credit_signals").select("cik,company_name").in("verdict", ["target", "rescue", "maybe"]).in("status", ["new", "added"]).limit(2000)).data || [];
     const cut = body.all ? Infinity : Date.now() - 14 * 864e5;   // officers change often at distressed companies: re-read every 2 weeks
     const have = new Map(((await sb.from("signal_contacts").select("key,sec_checked_at").eq("kind", "credit")).data || []).map((r: any) => [r.key, r.sec_checked_at]));
     return { items: (rows as any[]).filter(r => { const t = have.get(String(r.cik)); return !t || Date.parse(t) < cut; }).map(r => ({ cik: String(r.cik), company_name: r.company_name })) };

@@ -186,7 +186,7 @@ async function companies(key: string, budgetLeft: number) {
   const old = new Date(Date.now() - CO_RECHECK_DAYS * DAY).toISOString(), due = `web_checked_at.is.null,web_checked_at.lt.${old}`;
   // BDC refinancing targets and credit targets, best score first.
   const bdc = ((await sb.from("bdc_signals").select("*").eq("verdict", "target").eq("lane", "refi").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["bdc", r]);
-  const cr = ((await sb.from("credit_signals").select("*").eq("verdict", "target").or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["credit", r]);
+  const cr = ((await sb.from("credit_signals").select("*").in("verdict", ["target", "rescue"]).or(due).order("score", { ascending: false }).limit(n)).data || []).map((r: any) => ["credit", r]);
   // Alternate BDC and credit so neither list waits for the other to finish.
   const picked = (Array.from({ length: n }, (_, i) => [bdc[i], cr[i]]).flat().filter(Boolean) as [("credit" | "bdc"), any][]).slice(0, n);
   // Plus up to 2 PE-owned refi borrowers a run: find the owner's deal partner.

@@ -304,6 +304,16 @@ Today, Schedule, Resources (no one holds it right now, the role still exists). R
 - **New-debt 8-K (13 Nov 2026, CREDIT_RULES_VERSION 12):** `profile()` in credit_signals.py also returns the newest 8-K with Item 2.03 filed
   after the 10-K / 10-Q we read maturities from → `flags.new_debt_8k` {date, items, url}. A dated maturity with one = Maybe −15 "may
   already be refinanced, read the 8-K first" (an 8-K before that filing doesn't count). Test in test_credit_rules.mjs.
+- **Rescue lane (13 Nov 2026, Tengku: "we've been wasting leads"; Peter's background is distressed / special situations;
+  CREDIT_RULES_VERSION 14):** burning cash / over-levered used to be a cut. Now, when that is the ONLY cut reason and the company has
+  $20M+ revenue and $10M+ debt, `classifyCredit` returns verdict `rescue` with its own score (forbearance +25, going concern +15,
+  maturity 4–12 mo +20 / 12–24 +10, debt due > cash +15, revenue $20–200M +10, debt $20–150M +10, losses ≤10% of revenue or positive
+  EBITDA +10, losses >25% of revenue −15, news after the filing −10 to −20). ~212 companies on the first count. Credit tab → Rescue
+  view; no "Copy message" (the rescue offer and copy wait on Peter's list of rescue lenders); never in Send today's batch or Daily 3
+  (both take `target` only). Contacts (officers_todo, signal-contacts cron after the refinancing targets) and the fund-web news
+  check include rescue rows. Debt figures (same day): `credit_signals.py` falls back to total-debt tags (`DEBT_TOTAL`) and the filer's
+  own latest balance sheet (`latest_debt`, companyfacts) when the split tags are missing (`flags.debt_src` = 'total'); EBITDA falls
+  back to pretax income + interest + D&A. Test: `python3 -I scripts/tests/test_credit_debt.py`, test_credit_rules.mjs.
 - **Real maturity dates (6 Nov 2026, Tengku; `scripts/maturities.py`, self-check `python3 -I scripts/maturities.py`):** the balance sheet's
   "due within 12 months" also counts revolvers / convertibles that mature in 2029-30 (Bowman, Shutterstock, A10 were false alarms
   when checked by hand). Most filers don't tag maturity dates in XBRL (DLH doesn't), so the credit scan reads the latest 10-Q / 10-K

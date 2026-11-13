@@ -16,12 +16,18 @@ const spru = classifyCredit({ ...base, debt_current: 269.6e6, debt_noncurrent: 3
 
 assert.equal(ams.verdict, 'target'); assert.ok(ams.reasons.some(r => /^Lendable/.test(r.text)));
 assert.equal(dlh.verdict, 'target'); assert.ok(dlh.reasons.some(r => /^Lendable/.test(r.text)));
+// v14 (13 Nov 2026): rescues are no longer cut; they go to the Rescue lane (verdict 'rescue'), never to the refinancing targets.
 for (const [n, r] of [['XCF', xcf], ['Hydrofarm', hyfm], ['Spruce', spru], ['Agenus (small net debt)', agen], ['Karyopharm (net cash)', kpti], ['Celularity (no debt tags)', celu]]) {
-  assert.equal(r.verdict, 'cut', `${n} is a rescue`);
+  assert.notEqual(r.verdict, 'target', `${n} is never a refinancing target`);
   assert.ok(r.tags.some(t => t === 'burning_cash' || t === 'over_levered'), `${n} tagged unfinanceable`);
   assert.ok(r.reasons.some(x => /rescue.*private credit rarely/.test(x.text)), `${n} says rescue`);
-  assert.ok(r.score < ams.score, `${n} (${r.score}) below AMS (${ams.score})`);
 }
+assert.equal(spru.verdict, 'cut', 'Spruce: $663M of debt, too big even for a rescue lender');
+assert.equal(celu.verdict, 'cut', 'Celularity: no debt on file, nothing to refinance');
+for (const r of [xcf, hyfm, agen, kpti]) assert.equal(r.verdict, 'rescue');
+assert.ok(agen.score > xcf.score && agen.score > hyfm.score, `Agenus (losses 9% of revenue, ${agen.score}) ranks above XCF / Hydrofarm (losses > revenue)`);
+assert.ok(xcf.reasons.some(x => /an equity problem/.test(x.text)));
+console.log('rescue lane ok');
 assert.ok(ams.tags.includes('lendable') && dlh.tags.includes('lendable'));
 // Too big (4 Nov 2026): INNOVATE $616M debt, Universal Logistics $1.56B revenue.
 const vate = classifyCredit({ ...base, debt_current: 553.9e6, debt_noncurrent: 62.1e6, cash: 87.8e6, revenue: 1246e6, ebitda: 59.1e6, interest_expense: 30e6, public_float: 100e6, flags: gc });
